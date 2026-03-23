@@ -9,6 +9,7 @@ struct RootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var sidebarTab: SidebarTab = .library
     @State private var editingPuzzle: Puzzle? = nil
+    @State private var newPuzzleToken: UUID = UUID()
     @State private var store = PuzzleStore()
 
     var body: some View {
@@ -18,7 +19,11 @@ struct RootView: View {
                 columnVisibility: $columnVisibility,
                 sidebarTab: $sidebarTab,
                 editingPuzzle: $editingPuzzle,
-                store: store
+                store: store,
+                onNew: {
+                    editingPuzzle = nil
+                    newPuzzleToken = UUID()
+                }
             )
         } detail: {
             if sidebarTab == .library {
@@ -30,7 +35,7 @@ struct RootView: View {
                 }
             } else {
                 PuzzleEditorView(editingPuzzle: $editingPuzzle, store: store)
-                    .id(editingPuzzle?.id.uuidString ?? "new")
+                    .id(editingPuzzle?.id.uuidString ?? newPuzzleToken.uuidString)
             }
         }
         .navigationSplitViewStyle(.balanced)

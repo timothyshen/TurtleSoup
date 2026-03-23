@@ -3,7 +3,7 @@ import SwiftUI
 struct PuzzleEditorView: View {
 
     @Binding var editingPuzzle: Puzzle?
-    var store: PuzzleStore
+    @Bindable var store: PuzzleStore
 
     // Form state
     @State private var title: String = ""
@@ -175,9 +175,12 @@ struct PuzzleEditorView: View {
     // MARK: - Save
 
     private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !scenario.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !answer.trimmingCharacters(in: .whitespaces).isEmpty
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+        let trimmedScenario = scenario.trimmingCharacters(in: .whitespaces)
+        let trimmedAnswer = answer.trimmingCharacters(in: .whitespaces)
+        return !trimmedTitle.isEmpty &&
+               trimmedScenario.count >= 20 &&
+               trimmedAnswer.count >= 50
     }
 
     private func savePuzzle() {

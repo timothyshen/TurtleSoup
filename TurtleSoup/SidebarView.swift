@@ -6,7 +6,8 @@ struct SidebarView: View {
     @Binding var columnVisibility: NavigationSplitViewVisibility
     @Binding var sidebarTab: SidebarTab
     @Binding var editingPuzzle: Puzzle?
-    var store: PuzzleStore
+    @Bindable var store: PuzzleStore
+    var onNew: () -> Void
     @AppStorage("claude_api_key") private var apiKey = ""
     @State private var searchText = ""
     @State private var difficultyFilter: Puzzle.Difficulty? = nil
@@ -52,6 +53,7 @@ struct SidebarView: View {
                         .tag(puzzle)
                 }
                 .listStyle(.sidebar)
+                .searchable(text: $searchText, placement: .sidebar, prompt: "搜索谜题")
                 .onChange(of: selectedPuzzle) {
                     if selectedPuzzle != nil {
                         withAnimation {
@@ -60,7 +62,7 @@ struct SidebarView: View {
                     }
                 }
             } else {
-                MyPuzzlesSidebarView(editingPuzzle: $editingPuzzle, store: store)
+                MyPuzzlesSidebarView(editingPuzzle: $editingPuzzle, store: store, onNew: onNew)
             }
 
             Divider()
@@ -70,7 +72,6 @@ struct SidebarView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
         }
-        .searchable(text: $searchText, placement: .sidebar, prompt: "搜索谜题")
         .navigationTitle("🐢 海龟汤")
         .frame(minWidth: 240)
     }
@@ -119,7 +120,8 @@ struct SidebarView: View {
 struct MyPuzzlesSidebarView: View {
 
     @Binding var editingPuzzle: Puzzle?
-    var store: PuzzleStore
+    @Bindable var store: PuzzleStore
+    var onNew: () -> Void
 
     var body: some View {
         Group {
@@ -145,7 +147,7 @@ struct MyPuzzlesSidebarView: View {
         .toolbar {
             ToolbarItem {
                 Button {
-                    editingPuzzle = nil
+                    onNew()
                 } label: {
                     Label("新建", systemImage: "plus")
                 }
