@@ -12,7 +12,7 @@ struct SidebarView: View {
     @State private var searchText = ""
     @State private var difficultyFilter: Puzzle.Difficulty? = nil
 
-    private var puzzles: [Puzzle] { Puzzle.builtIn }   // TODO: 接后端
+    private var puzzles: [Puzzle] { Puzzle.builtIn + store.puzzles }
 
     private var filtered: [Puzzle] {
         puzzles.filter { p in
