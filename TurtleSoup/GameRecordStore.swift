@@ -32,7 +32,7 @@ final class GameRecordStore {
                                     record.puzzleID as CVarArg,
                                     record.startedAt as NSDate)
         dup.fetchLimit = 1
-        guard (try? ctx.fetch(dup).first) == nil else { return }
+        if let existing = try? ctx.fetch(dup), !existing.isEmpty { return }
 
         let recObj = NSEntityDescription.insertNewObject(
             forEntityName: "GameRecordEntity", into: ctx)
