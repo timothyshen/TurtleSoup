@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Puzzle
 
-struct Puzzle: Identifiable, Codable {
+struct Puzzle: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
     var difficulty: Difficulty
@@ -64,7 +64,11 @@ struct Message: Identifiable {
     var verdict: Verdict?
     let timestamp: Date
 
-    enum Role { case user, assistant, system }
+    enum Role: String {
+        case user      = "user"
+        case assistant = "assistant"
+        case system    = "system"
+    }
 
     enum Verdict: String, Codable {
         case yes   = "yes"
