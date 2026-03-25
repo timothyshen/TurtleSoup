@@ -194,6 +194,7 @@ struct GameView: View {
 
     @ViewBuilder
     private var historicalStatsSection: some View {
+        let _ = recordStore.savedRecordCount  // establishes @Observable dependency for auto-refresh
         let total = recordStore.playCount(for: vm.puzzle.id)
         if total > 0 {
             let rate = recordStore.winRate(for: vm.puzzle.id)

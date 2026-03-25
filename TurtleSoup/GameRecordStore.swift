@@ -16,6 +16,7 @@ struct GameRecord {
 final class GameRecordStore {
 
     private let pc: PersistenceController
+    private(set) var savedRecordCount: Int = 0
 
     init(pc: PersistenceController = .shared) {
         self.pc = pc
@@ -58,6 +59,7 @@ final class GameRecordStore {
         }
         recObj.setValue(msgSet, forKey: "messages")
 
+        savedRecordCount += 1
         pc.save()
     }
 
