@@ -22,7 +22,7 @@ final class PersistenceController {
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
     }
 
-    static func makeModel() -> NSManagedObjectModel {
+    private static func makeModel() -> NSManagedObjectModel {
         let model = NSManagedObjectModel()
 
         let puzzleE = entity("UserPuzzleEntity", attrs: [
