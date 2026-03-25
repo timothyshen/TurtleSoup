@@ -2,10 +2,11 @@ import SwiftUI
 
 struct PuzzleListView: View {
 
-    @AppStorage("claude_api_key") private var apiKey: String = "***REDACTED***"
+    @AppStorage("claude_api_key") private var apiKey: String = ""
     @State private var showKeyInput = false
+    @State private var recordStore = GameRecordStore()
 
-    private let puzzles = Puzzle.builtIn   // TODO: 接入后端后替换
+    private let puzzles = Puzzle.builtIn
 
     var body: some View {
         NavigationStack {
@@ -18,7 +19,7 @@ struct PuzzleListView: View {
             }
             .navigationTitle("🐢 海龟汤")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         showKeyInput = true
                     } label: {
@@ -32,14 +33,12 @@ struct PuzzleListView: View {
         }
     }
 
-    // MARK: - Puzzle grid
-
     private var puzzleGrid: some View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
                 ForEach(puzzles) { puzzle in
                     NavigationLink {
-                        GameView(puzzle: puzzle, apiKey: apiKey)
+                        GameView(puzzle: puzzle, apiKey: apiKey, recordStore: recordStore)
                     } label: {
                         PuzzleCard(puzzle: puzzle)
                     }
@@ -49,8 +48,6 @@ struct PuzzleListView: View {
             .padding(16)
         }
     }
-
-    // MARK: - API key prompt
 
     private var apiKeyPrompt: some View {
         VStack(spacing: 16) {
@@ -102,7 +99,7 @@ struct PuzzleCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-        .background(Color(.secondarySystemBackground))
+        .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -128,7 +125,6 @@ struct APIKeySheet: View {
                 Section {
                     SecureField("sk-ant-…", text: $draft)
                         .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
                 } header: {
                     Text("Claude API Key")
                 } footer: {
@@ -136,7 +132,6 @@ struct APIKeySheet: View {
                 }
             }
             .navigationTitle("配置 API Key")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }

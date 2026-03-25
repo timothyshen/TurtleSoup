@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var editingPuzzle: Puzzle? = nil
     @State private var newPuzzleToken: UUID = UUID()
     @State private var store = PuzzleStore()
+    @State private var recordStore = GameRecordStore()
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -28,7 +29,7 @@ struct RootView: View {
         } detail: {
             if sidebarTab == .library {
                 if let puzzle = selectedPuzzle {
-                    GameView(puzzle: puzzle, apiKey: apiKey)
+                    GameView(puzzle: puzzle, apiKey: apiKey, recordStore: recordStore)
                         .id(puzzle.id)   // 切题时强制重建 ViewModel
                 } else {
                     EmptyDetailView()
