@@ -9,7 +9,7 @@ final class PuzzleStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         clearAllPuzzles()
-        store = PuzzleStore()
+        store = PuzzleStore(pc: .test)
     }
 
     override func tearDown() {
@@ -43,7 +43,7 @@ final class PuzzleStoreTests: XCTestCase {
     func testPersistence() {
         let p = makePuzzle(title: "持久化")
         store.save(p)
-        let store2 = PuzzleStore()
+        let store2 = PuzzleStore(pc: .test)
         XCTAssertEqual(store2.puzzles.count, 1)
         XCTAssertEqual(store2.puzzles[0].title, "持久化")
     }
@@ -57,10 +57,10 @@ final class PuzzleStoreTests: XCTestCase {
     }
 
     private func clearAllPuzzles() {
-        let ctx = PersistenceController.shared.ctx
+        let ctx = PersistenceController.test.ctx
         let req = NSFetchRequest<NSManagedObject>(entityName: "UserPuzzleEntity")
         let all = (try? ctx.fetch(req)) ?? []
         all.forEach { ctx.delete($0) }
-        PersistenceController.shared.save()
+        PersistenceController.test.save()
     }
 }

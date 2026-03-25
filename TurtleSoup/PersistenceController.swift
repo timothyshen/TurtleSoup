@@ -3,6 +3,7 @@ import CoreData
 final class PersistenceController {
 
     static let shared = PersistenceController()
+    static let test = PersistenceController(inMemory: true)
 
     let container: NSPersistentContainer
     var ctx: NSManagedObjectContext { container.viewContext }

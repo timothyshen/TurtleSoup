@@ -6,9 +6,10 @@ import Observation
 final class PuzzleStore {
 
     private(set) var puzzles: [Puzzle] = []
-    private let pc = PersistenceController.shared
+    private let pc: PersistenceController
 
-    init() {
+    init(pc: PersistenceController = .shared) {
+        self.pc = pc
         migrateFromUserDefaultsIfNeeded()
         fetch()
     }
