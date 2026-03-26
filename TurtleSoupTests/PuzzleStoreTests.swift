@@ -2,9 +2,11 @@ import XCTest
 import CoreData
 @testable import TurtleSoup
 
+@MainActor
 final class PuzzleStoreTests: XCTestCase {
 
     private var store: PuzzleStore!
+    private var store2: PuzzleStore?
 
     override func setUp() {
         super.setUp()
@@ -13,6 +15,8 @@ final class PuzzleStoreTests: XCTestCase {
     }
 
     override func tearDown() {
+        store2 = nil
+        store = nil
         clearAllPuzzles()
         super.tearDown()
     }
@@ -43,9 +47,9 @@ final class PuzzleStoreTests: XCTestCase {
     func testPersistence() {
         let p = makePuzzle(title: "持久化")
         store.save(p)
-        let store2 = PuzzleStore(pc: .test)
-        XCTAssertEqual(store2.puzzles.count, 1)
-        XCTAssertEqual(store2.puzzles[0].title, "持久化")
+        store2 = PuzzleStore(pc: .test)
+        XCTAssertEqual(store2?.puzzles.count, 1)
+        XCTAssertEqual(store2?.puzzles[0].title, "持久化")
     }
 
     // MARK: - Helper
