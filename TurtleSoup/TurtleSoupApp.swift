@@ -4,7 +4,10 @@ import SwiftUI
 struct TurtleSoupApp: App {
     var body: some Scene {
         WindowGroup {
-            PuzzleListView()
+            RootView()
+        }
+        Settings {
+            SettingsView()
         }
     }
 }

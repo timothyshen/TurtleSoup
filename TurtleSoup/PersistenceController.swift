@@ -1,6 +1,9 @@
 import CoreData
+import os.log
 
 final class PersistenceController {
+
+    private let logger = Logger(subsystem: "com.haiguitang", category: "CoreData")
 
     static let shared = PersistenceController()
     static let test = PersistenceController(inMemory: true)
@@ -97,6 +100,10 @@ final class PersistenceController {
 
     func save() {
         guard ctx.hasChanges else { return }
-        try? ctx.save()
+        do {
+            try ctx.save()
+        } catch {
+            logger.error("CoreData save failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
