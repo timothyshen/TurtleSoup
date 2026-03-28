@@ -9,6 +9,7 @@ final class GameViewModel {
     var inputText: String = ""
     var isLoading: Bool = false
     var isGameWon: Bool = false
+    var showGiveUpConfirm: Bool = false
     var questionCount: Int = 0
     var errorMessage: String? = nil
     var showAnswer: Bool = false
@@ -52,7 +53,7 @@ final class GameViewModel {
 
                 if verdict == .win {
                     isGameWon = true
-                    persistRecord()
+                    persistRecord(isWon: true)
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     showAnswer = true
                 }
@@ -63,13 +64,20 @@ final class GameViewModel {
         }
     }
 
-    private func persistRecord() {
+    func giveUp() {
+        guard !isGameWon else { return }
+        isGameWon = true
+        persistRecord(isWon: false)
+        showAnswer = true
+    }
+
+    private func persistRecord(isWon: Bool) {
         let record = GameRecord(
             puzzleID:      puzzle.id,
             puzzleTitle:   puzzle.title,
             startedAt:     startedAt,
             endedAt:       Date(),
-            isWon:         true,
+            isWon:         isWon,
             questionCount: questionCount,
             messages:      messages.filter { $0.role != .system }
         )

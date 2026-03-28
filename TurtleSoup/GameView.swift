@@ -176,6 +176,23 @@ struct GameView: View {
                     .controlSize(.small)
                 }
 
+                if !vm.isGameWon {
+                    Button(role: .destructive) {
+                        vm.showGiveUpConfirm = true
+                    } label: {
+                        Label("放弃查看答案", systemImage: "flag.fill")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .confirmationDialog("确认放弃？", isPresented: $vm.showGiveUpConfirm, titleVisibility: .visible) {
+                        Button("放弃并查看汤底", role: .destructive) { vm.giveUp() }
+                        Button("继续游戏", role: .cancel) {}
+                    } message: {
+                        Text("放弃将记录为未完成，游戏结束后可查看汤底。")
+                    }
+                }
+
                 Button {
                     // TODO: 分享功能
                 } label: {
