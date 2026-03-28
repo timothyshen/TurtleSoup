@@ -7,9 +7,13 @@ final class PuzzleStore {
 
     private(set) var puzzles: [Puzzle] = []
     private let pc: PersistenceController
+    private let firestore: FirestoreService
+    /// Set by RootView when Firebase auth state changes.
+    var currentUID: String? = nil
 
-    init(pc: PersistenceController = .shared) {
+    init(pc: PersistenceController = .shared, firestore: FirestoreService = FirestoreService()) {
         self.pc = pc
+        self.firestore = firestore
         migrateFromUserDefaultsIfNeeded()
         fetch()
     }
@@ -21,6 +25,9 @@ final class PuzzleStore {
         fill(obj, from: puzzle)
         pc.save()
         fetch()
+        if let uid = currentUID {
+            Task { await firestore.savePuzzle(puzzle, uid: uid) }
+        }
     }
 
     func delete(_ puzzle: Puzzle) {
@@ -32,6 +39,9 @@ final class PuzzleStore {
             pc.save()
         }
         fetch()
+        if let uid = currentUID {
+            Task { await firestore.deletePuzzle(id: puzzle.id, uid: uid) }
+        }
     }
 
     // MARK: - Private

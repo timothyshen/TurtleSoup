@@ -4,6 +4,8 @@ struct PuzzleEditorView: View {
 
     @Binding var editingPuzzle: Puzzle?
     @Bindable var store: PuzzleStore
+    var authService: AuthService?
+    var publicStore: PublicPuzzleStore?
 
     // Form state
     @State private var title: String = ""
@@ -128,6 +130,17 @@ struct PuzzleEditorView: View {
                         .buttonStyle(.bordered)
                     }
                     Spacer()
+                    // 发布到广场（仅登录后且已保存的题目显示）
+                    if let puzzle = originalPuzzle,
+                       let uid = authService?.user?.uid,
+                       let store = publicStore {
+                        Button {
+                            Task { await store.publish(puzzle, uid: uid) }
+                        } label: {
+                            Label("发布到广场", systemImage: "globe")
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     Button("保存") {
                         savePuzzle()
                     }

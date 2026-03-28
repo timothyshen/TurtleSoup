@@ -7,6 +7,7 @@ struct SidebarView: View {
     @Binding var sidebarTab: SidebarTab
     @Binding var editingPuzzle: Puzzle?
     @Bindable var store: PuzzleStore
+    var publicStore: PublicPuzzleStore
     var onNew: () -> Void
     @AppStorage("claude_api_key") private var apiKey = ""
     @State private var searchText = ""
@@ -30,6 +31,7 @@ struct SidebarView: View {
             Picker("", selection: $sidebarTab) {
                 Text("题库").tag(SidebarTab.library)
                 Text("出题").tag(SidebarTab.create)
+                Text("广场").tag(SidebarTab.square)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -61,8 +63,14 @@ struct SidebarView: View {
                         }
                     }
                 }
-            } else {
+            } else if sidebarTab == .create {
                 MyPuzzlesSidebarView(editingPuzzle: $editingPuzzle, store: store, onNew: onNew)
+            } else {
+                PublicSquareView(
+                    publicStore: publicStore,
+                    selectedPuzzle: $selectedPuzzle,
+                    columnVisibility: $columnVisibility
+                )
             }
 
             Divider()

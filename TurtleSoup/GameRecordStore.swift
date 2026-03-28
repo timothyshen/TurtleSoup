@@ -16,10 +16,14 @@ struct GameRecord {
 final class GameRecordStore {
 
     private let pc: PersistenceController
+    private let firestore: FirestoreService
+    /// Set by RootView when Firebase auth state changes.
+    var currentUID: String? = nil
     private(set) var savedRecordCount: Int = 0
 
-    init(pc: PersistenceController = .shared) {
+    init(pc: PersistenceController = .shared, firestore: FirestoreService = FirestoreService()) {
         self.pc = pc
+        self.firestore = firestore
     }
 
     // MARK: - Write
@@ -61,6 +65,11 @@ final class GameRecordStore {
 
         savedRecordCount += 1
         pc.save()
+
+        // Sync to Firestore if signed in
+        if let uid = currentUID {
+            Task { await firestore.saveRecord(record, uid: uid) }
+        }
     }
 
     // MARK: - Read / Stats
