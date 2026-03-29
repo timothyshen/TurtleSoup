@@ -32,17 +32,17 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		BBF937ED2F7124D2001E4F63 /* haiguitang */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = haiguitang;
+			path = TurtleSoup;
 			sourceTree = "<group>";
 		};
 		BBF937FD2F7124D3001E4F63 /* haiguitangTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = haiguitangTests;
+			path = TurtleSoupTests;
 			sourceTree = "<group>";
 		};
 		BBF938072F7124D3001E4F63 /* haiguitangUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = haiguitangUITests;
+			path = TurtleSoupUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
