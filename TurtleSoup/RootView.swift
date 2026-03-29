@@ -51,6 +51,9 @@ struct RootView: View {
         .onChange(of: authService.user?.uid) { _, uid in
             recordStore.currentUID = uid
             store.currentUID = uid
+            if let uid {
+                Task { await recordStore.syncFromFirestore(uid: uid) }
+            }
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)

@@ -7,11 +7,11 @@ final class PuzzleStore {
 
     private(set) var puzzles: [Puzzle] = []
     private let pc: PersistenceController
-    private let firestore: FirestoreService
+    private let firestore: any FirestoreServicing
     /// Set by RootView when Firebase auth state changes.
     var currentUID: String? = nil
 
-    init(pc: PersistenceController = .shared, firestore: FirestoreService = FirestoreService()) {
+    init(pc: PersistenceController = .shared, firestore: any FirestoreServicing = FirestoreService()) {
         self.pc = pc
         self.firestore = firestore
         migrateFromUserDefaultsIfNeeded()

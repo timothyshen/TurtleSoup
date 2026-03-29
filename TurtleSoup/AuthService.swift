@@ -56,9 +56,12 @@ final class AuthService: NSObject {
         case .failure(let error):
             throw error
         case .success(let auth):
+            // Consume nonce immediately to prevent stale-nonce reuse on concurrent flows
+            let nonce = currentNonce
+            currentNonce = nil
             guard
+                let nonce,
                 let appleCredential = auth.credential as? ASAuthorizationAppleIDCredential,
-                let nonce = currentNonce,
                 let tokenData = appleCredential.identityToken,
                 let token = String(data: tokenData, encoding: .utf8)
             else { throw AuthError.invalidCredential }

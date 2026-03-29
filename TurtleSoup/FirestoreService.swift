@@ -2,7 +2,7 @@ import Foundation
 import FirebaseFirestore
 import os.log
 
-struct FirestoreService {
+struct FirestoreService: FirestoreServicing {
 
     private let db = Firestore.firestore()
     private let logger = Logger(subsystem: "com.haiguitang", category: "Firestore")
@@ -26,6 +26,7 @@ struct FirestoreService {
 
     func saveRecord(_ record: GameRecord, uid: String) async {
         let data: [String: Any] = [
+            "id":            record.id.uuidString,
             "puzzleID":      record.puzzleID.uuidString,
             "puzzleTitle":   record.puzzleTitle,
             "startedAt":     Timestamp(date: record.startedAt),
@@ -34,18 +35,42 @@ struct FirestoreService {
             "questionCount": record.questionCount
         ]
         do {
+            // Use record.id (UUID) as the document ID to avoid timeInterval precision collisions
             try await recordsRef(uid)
-                .document(String(record.startedAt.timeIntervalSince1970))
+                .document(record.id.uuidString)
                 .setData(data, merge: true)
         } catch {
             logger.error("Firestore saveRecord failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    func fetchRecords(uid: String) async -> [[String: Any]] {
+    /// Fetch remote game records and parse them into `GameRecord` values.
+    /// Returned records have empty `messages` (not stored in Firestore).
+    func fetchRecords(uid: String) async -> [GameRecord] {
         do {
             let snapshot = try await recordsRef(uid).getDocuments()
-            return snapshot.documents.map { $0.data() }
+            return snapshot.documents.compactMap { doc in
+                let d = doc.data()
+                guard
+                    let idStr    = d["id"]            as? String, let id = UUID(uuidString: idStr),
+                    let pidStr   = d["puzzleID"]       as? String, let puzzleID = UUID(uuidString: pidStr),
+                    let title    = d["puzzleTitle"]    as? String,
+                    let startTS  = d["startedAt"]      as? Timestamp,
+                    let endTS    = d["endedAt"]        as? Timestamp,
+                    let isWon    = d["isWon"]          as? Bool,
+                    let qCount   = d["questionCount"]  as? Int
+                else { return nil }
+                return GameRecord(
+                    id:            id,
+                    puzzleID:      puzzleID,
+                    puzzleTitle:   title,
+                    startedAt:     startTS.dateValue(),
+                    endedAt:       endTS.dateValue(),
+                    isWon:         isWon,
+                    questionCount: qCount,
+                    messages:      []
+                )
+            }
         } catch {
             logger.error("Firestore fetchRecords failed: \(error.localizedDescription, privacy: .public)")
             return []

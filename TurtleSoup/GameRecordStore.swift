@@ -3,6 +3,7 @@ import Observation
 
 /// Snapshot of one complete game session, used for persistence.
 struct GameRecord {
+    let id: UUID
     let puzzleID: UUID
     let puzzleTitle: String
     let startedAt: Date
@@ -10,18 +11,34 @@ struct GameRecord {
     let isWon: Bool
     let questionCount: Int
     let messages: [Message]
+
+    init(id: UUID = UUID(),
+         puzzleID: UUID, puzzleTitle: String,
+         startedAt: Date, endedAt: Date,
+         isWon: Bool, questionCount: Int,
+         messages: [Message]) {
+        self.id            = id
+        self.puzzleID      = puzzleID
+        self.puzzleTitle   = puzzleTitle
+        self.startedAt     = startedAt
+        self.endedAt       = endedAt
+        self.isWon         = isWon
+        self.questionCount = questionCount
+        self.messages      = messages
+    }
 }
 
 @Observable
+@MainActor
 final class GameRecordStore {
 
     private let pc: PersistenceController
-    private let firestore: FirestoreService
+    private let firestore: any FirestoreServicing
     /// Set by RootView when Firebase auth state changes.
     var currentUID: String? = nil
     private(set) var savedRecordCount: Int = 0
 
-    init(pc: PersistenceController = .shared, firestore: FirestoreService = FirestoreService()) {
+    init(pc: PersistenceController = .shared, firestore: any FirestoreServicing = FirestoreService()) {
         self.pc = pc
         self.firestore = firestore
     }
@@ -69,6 +86,17 @@ final class GameRecordStore {
         // Sync to Firestore if signed in
         if let uid = currentUID {
             Task { await firestore.saveRecord(record, uid: uid) }
+        }
+    }
+
+    // MARK: - Remote Sync
+
+    /// Pull game records from Firestore and merge into local CoreData.
+    /// Messages are not stored in Firestore; synced records will have empty message history.
+    func syncFromFirestore(uid: String) async {
+        let remote = await firestore.fetchRecords(uid: uid)
+        for record in remote {
+            saveRecord(record)   // dedup by puzzleID + startedAt is handled inside saveRecord
         }
     }
 

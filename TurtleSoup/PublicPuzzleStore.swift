@@ -6,10 +6,18 @@ final class PublicPuzzleStore {
 
     private(set) var puzzles: [Puzzle] = []
     private(set) var isLoading = false
-    private let firestore = FirestoreService()
+    private let firestore: any FirestoreServicing
+
+    init(firestore: any FirestoreServicing = FirestoreService()) {
+        self.firestore = firestore
+    }
 
     func fetchIfNeeded() async {
         guard puzzles.isEmpty else { return }
+        await refresh()
+    }
+
+    func refresh() async {
         isLoading = true
         puzzles = await firestore.fetchPublicPuzzles()
         isLoading = false

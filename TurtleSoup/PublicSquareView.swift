@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PublicSquareView: View {
 
-    @State var publicStore: PublicPuzzleStore
+    var publicStore: PublicPuzzleStore
     @Binding var selectedPuzzle: Puzzle?
     @Binding var columnVisibility: NavigationSplitViewVisibility
 
@@ -39,5 +39,15 @@ struct PublicSquareView: View {
             }
         }
         .task { await publicStore.fetchIfNeeded() }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    Task { await publicStore.refresh() }
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .disabled(publicStore.isLoading)
+            }
+        }
     }
 }

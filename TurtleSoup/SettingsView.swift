@@ -4,7 +4,7 @@ import AuthenticationServices
 struct SettingsView: View {
 
     @AppStorage("claude_api_key") private var apiKey = ""
-    var authService: AuthService
+    @State var authService: AuthService
 
     @State private var email = ""
     @State private var password = ""
@@ -28,7 +28,11 @@ struct SettingsView: View {
                 if authService.isSignedIn {
                     LabeledContent("已登录", value: authService.displayName)
                     Button("退出登录", role: .destructive) {
-                        try? authService.signOut()
+                        do {
+                            try authService.signOut()
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
                     }
                 } else {
                     TextField("邮箱", text: $email)
