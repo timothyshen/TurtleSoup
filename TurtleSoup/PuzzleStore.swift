@@ -44,6 +44,21 @@ final class PuzzleStore {
         }
     }
 
+    // MARK: - Remote Sync
+
+    /// Pull user puzzles from Firestore and upsert into local CoreData (by UUID).
+    /// Does NOT push back to Firestore — that would create a write-amplification loop.
+    func syncFromFirestore(uid: String) async {
+        let remote = await firestore.fetchUserPuzzles(uid: uid)
+        guard !remote.isEmpty else { return }
+        for puzzle in remote {
+            let obj = findOrCreate(id: puzzle.id)
+            fill(obj, from: puzzle)
+        }
+        pc.save()
+        fetch()
+    }
+
     // MARK: - Private
 
     private func fetch() {

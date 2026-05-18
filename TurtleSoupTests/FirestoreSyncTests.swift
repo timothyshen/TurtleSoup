@@ -13,6 +13,8 @@ final class MockFirestoreService: FirestoreServicing {
 
     /// Stubbed return value for fetchRecords
     var stubbedRecords: [GameRecord] = []
+    /// Stubbed return value for fetchUserPuzzles
+    var stubbedUserPuzzles: [Puzzle] = []
 
     func saveRecord(_ record: GameRecord, uid: String) async {
         savedRecords.append(record)
@@ -26,7 +28,7 @@ final class MockFirestoreService: FirestoreServicing {
     func deletePuzzle(id: UUID, uid: String) async {
         deletedPuzzleIDs.append(id)
     }
-    func fetchUserPuzzles(uid: String) async -> [[String: Any]] { [] }
+    func fetchUserPuzzles(uid: String) async -> [Puzzle] { stubbedUserPuzzles }
     func publishPuzzle(_ puzzle: Puzzle, uid: String) async {
         publishedPuzzles.append(puzzle)
     }
@@ -161,10 +163,45 @@ final class PuzzleStoreSyncTests: XCTestCase {
         XCTAssertTrue(mock.deletedPuzzleIDs.isEmpty)
     }
 
+    func testSyncFromFirestoreMergesRemotePuzzles() async {
+        let remote = makePuzzle(title: "Remote Puzzle")
+        mock.stubbedUserPuzzles = [remote]
+        await store.syncFromFirestore(uid: "uid_abc")
+        XCTAssertTrue(store.puzzles.contains(where: { $0.id == remote.id }))
+    }
+
+    func testSyncFromFirestoreUpsertsByID() async {
+        // Save a local puzzle, then pull a remote one with same ID but different title.
+        // Remote should win (upsert by UUID).
+        let id = UUID()
+        let local  = Puzzle(id: id, title: "Local",  difficulty: .easy,
+                            scenario: "s", answer: "a", hint: nil,
+                            author: "me", playCount: 0)
+        let remote = Puzzle(id: id, title: "Remote", difficulty: .medium,
+                            scenario: "s2", answer: "a2", hint: "h",
+                            author: "them", playCount: 0)
+        store.save(local)
+        mock.stubbedUserPuzzles = [remote]
+        await store.syncFromFirestore(uid: "uid_abc")
+
+        let matches = store.puzzles.filter { $0.id == id }
+        XCTAssertEqual(matches.count, 1, "Should not duplicate on UUID match")
+        XCTAssertEqual(matches.first?.title, "Remote")
+        XCTAssertEqual(matches.first?.difficulty, .medium)
+    }
+
+    func testSyncFromFirestoreEmptyRemoteIsNoOp() async {
+        let local = makePuzzle(title: "Local Only")
+        store.save(local)
+        mock.stubbedUserPuzzles = []
+        await store.syncFromFirestore(uid: "uid_abc")
+        XCTAssertTrue(store.puzzles.contains(where: { $0.id == local.id }))
+    }
+
     // MARK: - Helpers
 
-    private func makePuzzle() -> Puzzle {
-        Puzzle(id: UUID(), title: "题目", difficulty: .easy,
+    private func makePuzzle(title: String = "题目") -> Puzzle {
+        Puzzle(id: UUID(), title: title, difficulty: .easy,
                scenario: "汤面", answer: "汤底", hint: nil,
                author: "测试", playCount: 0)
     }

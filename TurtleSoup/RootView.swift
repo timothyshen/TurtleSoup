@@ -48,11 +48,14 @@ struct RootView: View {
                 .id(editingPuzzle?.id.uuidString ?? newPuzzleToken.uuidString)
             }
         }
-        .onChange(of: authService.user?.uid) { _, uid in
+        .task(id: authService.user?.uid) {
+            // Runs on first appear AND every time uid changes (login/logout).
+            let uid = authService.user?.uid
             recordStore.currentUID = uid
             store.currentUID = uid
             if let uid {
-                Task { await recordStore.syncFromFirestore(uid: uid) }
+                await recordStore.syncFromFirestore(uid: uid)
+                await store.syncFromFirestore(uid: uid)
             }
         }
         .navigationSplitViewStyle(.balanced)

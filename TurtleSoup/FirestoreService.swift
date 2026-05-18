@@ -105,10 +105,28 @@ struct FirestoreService: FirestoreServicing {
         }
     }
 
-    func fetchUserPuzzles(uid: String) async -> [[String: Any]] {
+    func fetchUserPuzzles(uid: String) async -> [Puzzle] {
         do {
             let snapshot = try await puzzlesRef(uid).getDocuments()
-            return snapshot.documents.map { $0.data() }
+            return snapshot.documents.compactMap { doc in
+                let d = doc.data()
+                guard
+                    let idStr    = d["id"]         as? String, let id = UUID(uuidString: idStr),
+                    let title    = d["title"]       as? String,
+                    let diffStr  = d["difficulty"]  as? String,
+                    let diff     = Puzzle.Difficulty(rawValue: diffStr),
+                    let scenario = d["scenario"]    as? String,
+                    let answer   = d["answer"]      as? String,
+                    let author   = d["author"]      as? String
+                else { return nil }
+                return Puzzle(
+                    id: id, title: title, difficulty: diff,
+                    scenario: scenario, answer: answer,
+                    hint: d["hint"] as? String,
+                    author: author,
+                    playCount: d["playCount"] as? Int ?? 0
+                )
+            }
         } catch {
             logger.error("Firestore fetchUserPuzzles failed: \(error.localizedDescription, privacy: .public)")
             return []
