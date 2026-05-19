@@ -35,6 +35,12 @@ final class GameViewModel {
     /// Set after the first persistRecord call so generateReview knows which
     /// CoreData row to attach the review to.
     private var lastSavedRecordID: UUID? = nil
+    /// Handle to the in-flight review-generation Task. Held so the UI can
+    /// cancel it explicitly (cancel button) or implicitly (sheet dismiss).
+    /// AsyncThrowingStream.onTermination propagates the cancellation down
+    /// to the underlying URLSession task, so the network request actually
+    /// stops — not just the consumer loop.
+    private var reviewTask: Task<Void, Never>? = nil
 
     /// Designated init. Tests use this with a `ClaudeService` constructed
     /// against a mocked URLSession; production code uses the Transport
@@ -170,10 +176,38 @@ final class GameViewModel {
 
     // MARK: - AI review
 
+    /// Kick off review generation. Wraps the async work in a Task so the
+    /// UI can cancel it (cancel button or sheet dismiss). Safe to call
+    /// from a synchronous SwiftUI action handler — no need for the caller
+    /// to spin up its own Task.
+    func startReviewGeneration(config: ReviewService.Config) {
+        // Don't double-start; the in-flight task will populate everything.
+        guard aiReview == nil, !isGeneratingReview else { return }
+        reviewTask = Task { [weak self] in
+            await self?.generateReview(config: config)
+        }
+    }
+
+    /// Cancel an in-flight review. The AsyncThrowingStream's onTermination
+    /// hook propagates this down to URLSession so the network request
+    /// stops too — we don't just orphan it. UI state (isGeneratingReview,
+    /// reviewProgress) gets reset to pre-streaming so the sheet shows the
+    /// "生成 AI 复盘" button again.
+    func cancelReviewGeneration() {
+        reviewTask?.cancel()
+        reviewTask = nil
+        isGeneratingReview = false
+        reviewProgress = []
+        // Leave reviewError alone — if it's set, the user should see why.
+    }
+
     /// Generate a post-game AI review and persist it onto the saved record.
     /// No-op if a review already exists or no record has been saved (mid-game).
     /// Streams progress events so the answer sheet can render a per-field
     /// checklist instead of a blank spinner.
+    ///
+    /// Prefer `startReviewGeneration(config:)` from UI code — it owns the
+    /// cancel-able Task handle and shields callers from threading details.
     func generateReview(config: ReviewService.Config) async {
         guard aiReview == nil, !isGeneratingReview else { return }
         guard let recordID = lastSavedRecordID else {
@@ -184,7 +218,10 @@ final class GameViewModel {
         isGeneratingReview = true
         reviewError = nil
         reviewProgress = []
-        defer { isGeneratingReview = false }
+        defer {
+            isGeneratingReview = false
+            reviewTask = nil
+        }
 
         do {
             let service = ReviewService(config: config)
@@ -195,6 +232,7 @@ final class GameViewModel {
                 questionCount: questionCount
             )
             for try await event in stream {
+                try Task.checkCancellation()
                 switch event {
                 case .progress(let field, let value):
                     if !reviewProgress.contains(where: { $0.field == field }) {
@@ -205,6 +243,9 @@ final class GameViewModel {
                     aiReview = review
                 }
             }
+        } catch is CancellationError {
+            // Expected on user-initiated cancel; cancelReviewGeneration
+            // already reset the UI state. Don't surface as an error.
         } catch {
             reviewError = error.localizedDescription
         }

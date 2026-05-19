@@ -27,6 +27,10 @@ struct AIPuzzleGeneratorSheet: View {
     /// Fields that have streamed in so far, in arrival order. Drives the
     /// progress checklist UI shown while `isGenerating` is true.
     @State private var streamedFields: [(field: String, value: String)] = []
+    /// Handle to the in-flight generation. Held so dismissing the sheet
+    /// (X button, Esc, or 取消) actually cancels the URLSession task
+    /// rather than orphaning it.
+    @State private var streamTask: Task<Void, Never>? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -48,6 +52,7 @@ struct AIPuzzleGeneratorSheet: View {
         }
         .padding(24)
         .frame(width: 560, height: 540)
+        .onDisappear { cancelStream() }
     }
 
     // MARK: - Sections
@@ -141,6 +146,12 @@ struct AIPuzzleGeneratorSheet: View {
                 Text("正在构思题目…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                Spacer()
+                Button("取消", role: .cancel) {
+                    cancelStream()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
             }
 
             StreamingChecklist(
@@ -192,7 +203,7 @@ struct AIPuzzleGeneratorSheet: View {
                 .keyboardShortcut(.defaultAction)
             } else {
                 Button {
-                    Task { await runGeneration() }
+                    startStream()
                 } label: {
                     if isGenerating {
                         ProgressView().controlSize(.small)
@@ -209,12 +220,33 @@ struct AIPuzzleGeneratorSheet: View {
 
     // MARK: - Actions
 
-    private func runGeneration() async {
+    /// Kick off generation in a cancellable Task. Stored on `streamTask`
+    /// so dismiss-mid-stream (X button, cmd-W, etc) actually aborts the
+    /// upstream URLSession call rather than letting it run to completion
+    /// against a dead UI.
+    private func startStream() {
         guard let config else { return }
+        cancelStream()  // belt + suspenders: defensively clear any prior task
+        streamTask = Task { await runGeneration(config: config) }
+    }
+
+    private func cancelStream() {
+        streamTask?.cancel()
+        streamTask = nil
+        isGenerating = false
+        // Keep streamedFields visible so the user sees what was almost
+        // generated; clearing them would feel like the cancel "won" too
+        // hard. They get reset on the next startStream().
+    }
+
+    private func runGeneration(config: PuzzleGenerationService.Config) async {
         isGenerating = true
         errorMessage = nil
         streamedFields = []
-        defer { isGenerating = false }
+        defer {
+            isGenerating = false
+            streamTask = nil
+        }
 
         do {
             let service = PuzzleGenerationService(config: config)
@@ -223,6 +255,7 @@ struct AIPuzzleGeneratorSheet: View {
                 difficulty: usePreferredDifficulty ? difficulty : nil
             )
             for try await event in stream {
+                try Task.checkCancellation()
                 switch event {
                 case .progress(let field, let value):
                     // Don't overwrite an already-streamed field if the proxy
@@ -234,6 +267,8 @@ struct AIPuzzleGeneratorSheet: View {
                     generated = puzzle
                 }
             }
+        } catch is CancellationError {
+            // User-initiated cancel; cancelStream already reset isGenerating.
         } catch {
             errorMessage = error.localizedDescription
         }

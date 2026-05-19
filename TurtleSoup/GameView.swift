@@ -335,7 +335,7 @@ struct GameView: View {
                 }
                 Button {
                     guard let cfg = reviewConfig else { return }
-                    Task { await vm.generateReview(config: cfg) }
+                    vm.startReviewGeneration(config: cfg)
                 } label: {
                     Label("生成 AI 复盘", systemImage: "wand.and.stars")
                 }
@@ -400,6 +400,12 @@ struct GameView: View {
                 Text("正在复盘…")
                     .foregroundStyle(.secondary)
                     .font(.callout)
+                Spacer()
+                Button("取消", role: .cancel) {
+                    vm.cancelReviewGeneration()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
             }
             StreamingChecklist(
                 rows: ChecklistSchemas.review,
