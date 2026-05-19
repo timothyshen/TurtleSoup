@@ -61,23 +61,48 @@ final class GameViewModel {
 
         inputText = ""
         questionCount += 1
+        let historySnapshot = messages   // capture before mutating
         messages.append(Message(role: .user, text: text))
 
         isLoading = true
         errorMessage = nil
 
+        // Streaming send: an empty assistant placeholder goes in first, then
+        // we fill its verdict (badge shows) and text (bubble appears) as
+        // events arrive. If anything throws, we strip the placeholder so the
+        // chat doesn't show a ghost bubble.
+        let placeholderID = UUID()
+        let placeholder = Message(
+            id: placeholderID, role: .assistant, text: "",
+            verdict: nil, timestamp: Date()
+        )
+        messages.append(placeholder)
+
         Task {
+            var finalVerdict: Message.Verdict? = nil
             do {
-                let response = try await claude.send(
+                let stream = claude.sendStream(
                     userInput: text,
-                    history: messages,
+                    history: historySnapshot,
                     puzzle: puzzle
                 )
-                let verdict = Message.Verdict(rawValue: response.verdict) ?? .irr
-                let comment = response.comment.isEmpty ? verdict.label : response.comment
-                messages.append(Message(role: .assistant, text: comment, verdict: verdict))
+                for try await event in stream {
+                    switch event {
+                    case .verdictReady(let raw):
+                        let v = Message.Verdict(rawValue: raw) ?? .irr
+                        updatePlaceholder(id: placeholderID) { $0.verdict = v }
+                    case .complete(let response):
+                        let verdict = Message.Verdict(rawValue: response.verdict) ?? .irr
+                        let comment = response.comment.isEmpty ? verdict.label : response.comment
+                        replacePlaceholder(
+                            id: placeholderID,
+                            with: Message(role: .assistant, text: comment, verdict: verdict)
+                        )
+                        finalVerdict = verdict
+                    }
+                }
 
-                if verdict == .win {
+                if finalVerdict == .win {
                     isGameWon = true
                     persistRecord(isWon: true)
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -85,9 +110,31 @@ final class GameViewModel {
                 }
             } catch {
                 errorMessage = error.localizedDescription
+                // Drop the placeholder so the chat history doesn't show a
+                // half-filled bubble after a failure.
+                messages.removeAll { $0.id == placeholderID }
             }
             isLoading = false
         }
+    }
+
+    /// In-place update of an existing message identified by `id`. Used to
+    /// flash the verdict badge before the comment text arrives.
+    private func updatePlaceholder(id: UUID, mutate: (inout Message) -> Void) {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        var msg = messages[i]
+        mutate(&msg)
+        messages[i] = msg
+    }
+
+    /// Full replacement when the final response is parsed. Preserves the
+    /// placeholder's position so the bubble doesn't jump in the scroll view.
+    private func replacePlaceholder(id: UUID, with newMessage: Message) {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else {
+            messages.append(newMessage)
+            return
+        }
+        messages[i] = newMessage
     }
 
     func giveUp() {

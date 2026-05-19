@@ -37,7 +37,7 @@ final class GameViewModelTests: XCTestCase {
     func testWinOnPublicPuzzleIncrementsRemotePlayCount() async throws {
         let puzzleID = UUID()
         MockURLProtocol.requestHandler = { _ in
-            (200, [:], anthropicSuccessBody(verdict: "win", comment: "对了"))
+            (200, [:], anthropicSSEBody(verdict: "win", comment: "对了"))
         }
         let vm = makeVM(puzzle: makePuzzle(id: puzzleID), isPublic: true)
         vm.inputText = "他认识凶手吗？"
@@ -72,7 +72,7 @@ final class GameViewModelTests: XCTestCase {
 
     func testSendAppendsUserMessageAndIncrementsCountImmediately() async throws {
         MockURLProtocol.requestHandler = { _ in
-            (200, [:], anthropicSuccessBody(verdict: "irr", comment: ""))
+            (200, [:], anthropicSSEBody(verdict: "irr", comment: ""))
         }
         let vm = makeVM()
 
@@ -119,7 +119,7 @@ final class GameViewModelTests: XCTestCase {
 
     func testIrrelevantVerdictUsesLabelWhenCommentEmpty() async throws {
         MockURLProtocol.requestHandler = { _ in
-            (200, [:], anthropicSuccessBody(verdict: "irr", comment: ""))
+            (200, [:], anthropicSSEBody(verdict: "irr", comment: ""))
         }
         let vm = makeVM()
         vm.inputText = "天气好吗？"
@@ -134,7 +134,7 @@ final class GameViewModelTests: XCTestCase {
 
     func testNonEmptyCommentIsUsedAsBubbleText() async throws {
         MockURLProtocol.requestHandler = { _ in
-            (200, [:], anthropicSuccessBody(verdict: "yes", comment: "对了"))
+            (200, [:], anthropicSSEBody(verdict: "yes", comment: "对了"))
         }
         let vm = makeVM()
         vm.inputText = "他认识凶手吗？"
@@ -151,7 +151,7 @@ final class GameViewModelTests: XCTestCase {
     func testWinFlipsStateAndPersistsRecord() async throws {
         let puzzleID = UUID()
         MockURLProtocol.requestHandler = { _ in
-            (200, [:], anthropicSuccessBody(verdict: "win", comment: "完全猜中"))
+            (200, [:], anthropicSSEBody(verdict: "win", comment: "完全猜中"))
         }
         let vm = makeVM(puzzle: makePuzzle(id: puzzleID))
         vm.inputText = "他是为了纪念亡妻"

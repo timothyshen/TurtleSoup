@@ -171,13 +171,7 @@ final class ReviewServiceTests: XCTestCase {
     }
 }
 
-// MARK: - File-scope fixtures
-
-private func samplePuzzle() -> Puzzle {
-    Puzzle(id: UUID(), title: "测试题", difficulty: .medium,
-           scenario: "汤面", answer: "汤底关键真相",
-           hint: nil, author: "测试", playCount: 0)
-}
+// MARK: - File-scope fixtures (samplePuzzle lives in TestFixtures.swift)
 
 /// Returns: system (filtered out) + user + assistant + user.
 private func sampleMessages() -> [Message] {

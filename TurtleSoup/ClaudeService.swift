@@ -181,6 +181,180 @@ actor ClaudeService {
         return obj
     }
 
+    // MARK: - Streaming
+
+    /// Events emitted by `sendStream` as the model produces a verdict.
+    enum StreamEvent {
+        /// The `verdict` field has been parsed from the partial response.
+        /// Emitted as soon as we see a complete `"verdict":"X"` substring,
+        /// usually well before the full comment finishes streaming. The UI
+        /// uses this to flash the verdict badge early.
+        case verdictReady(String)
+        /// The full response has been received and parsed. After this, no
+        /// further events fire; the stream terminates.
+        case complete(ClaudeAgentResponse)
+    }
+
+    /// Streaming variant of `send`. Same request shape but with
+    /// `stream: true` added. The transport layer (proxy or direct) passes
+    /// SSE through; we parse `content_block_delta` events and accumulate
+    /// the text until we can yield `.verdictReady` early, then `.complete`
+    /// at `message_stop`.
+    ///
+    /// Cancelling the consumer's loop cancels the underlying URLSession task.
+    func sendStream(
+        userInput: String,
+        history: [Message],
+        puzzle: Puzzle
+    ) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.runStream(
+                        userInput: userInput,
+                        history: history,
+                        puzzle: puzzle,
+                        continuation: continuation
+                    )
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func runStream(
+        userInput: String,
+        history: [Message],
+        puzzle: Puzzle,
+        continuation: AsyncThrowingStream<StreamEvent, Error>.Continuation
+    ) async throws {
+        var messages: [[String: Any]] = history
+            .filter { $0.role == .user || $0.role == .assistant }
+            .map { ["role": $0.role == .user ? "user" : "assistant",
+                    "content": $0.role == .assistant ? buildAssistantContent($0) : $0.text] }
+        messages.append(["role": "user", "content": userInput])
+
+        let body: [String: Any] = [
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 150,
+            "system": [
+                [
+                    "type": "text",
+                    "text": systemPrompt(for: puzzle),
+                    "cache_control": ["type": "ephemeral"]
+                ]
+            ],
+            "thinking": ["type": "disabled"],
+            "output_config": ["effort": "low"],
+            "stream": true,
+            "messages": messages
+        ]
+
+        let request = try await buildRequest(body: body)
+        let (bytes, response) = try await session.bytes(for: request)
+
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            // Non-200: collect the error body so the upstream message is
+            // surfaced to the UI exactly like the non-streaming path does.
+            var errData = Data()
+            for try await byte in bytes {
+                errData.append(byte)
+                if errData.count > 4096 { break }
+            }
+            let errText = String(data: errData, encoding: .utf8) ?? "unknown"
+            throw ClaudeError.apiError(errText)
+        }
+
+        // SSE parser. Anthropic events look like:
+        //   event: content_block_delta
+        //   data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"..."}}
+        // We only care about data: lines and ignore the event: line — the
+        // payload's `type` field is authoritative.
+        var accumulator = ""
+        var verdictEmitted = false
+
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data: ") else { continue }
+            let json = line.dropFirst(6)
+            guard let jsonData = json.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  let type = obj["type"] as? String
+            else { continue }
+
+            switch type {
+            case "content_block_delta":
+                guard let delta = obj["delta"] as? [String: Any],
+                      let text = delta["text"] as? String else { continue }
+                accumulator += text
+
+                if !verdictEmitted, let v = Self.extractVerdict(from: accumulator) {
+                    continuation.yield(.verdictReady(v))
+                    verdictEmitted = true
+                }
+
+            case "message_stop":
+                // Final parse — same defensive cleanup as the non-streaming
+                // path so refusals or markdown fences degrade gracefully.
+                let cleaned = accumulator
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "```json", with: "")
+                    .replacingOccurrences(of: "```", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let final: ClaudeAgentResponse
+                if let data = cleaned.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(ClaudeAgentResponse.self, from: data) {
+                    final = decoded
+                } else {
+                    final = ClaudeAgentResponse(verdict: "irr", comment: "")
+                }
+                continuation.yield(.complete(final))
+                continuation.finish()
+                return
+
+            default:
+                continue
+            }
+        }
+
+        // Stream ended without a message_stop — best-effort completion so
+        // the consumer's loop doesn't hang.
+        continuation.yield(.complete(ClaudeAgentResponse(verdict: "irr", comment: "")))
+        continuation.finish()
+    }
+
+    /// Best-effort extractor for the `verdict` field from a partially-built
+    /// JSON object. Returns the verdict value once the closing quote has
+    /// been seen; nil otherwise.
+    ///
+    /// nonisolated so we can hand it to BackgroundActor / tests / etc. with
+    /// no actor hop.
+    nonisolated static func extractVerdict(from buffer: String) -> String? {
+        // Pattern: "verdict" : "X"  — tolerant to whitespace around the colon.
+        // The closing quote bounds it; we don't try to handle escape sequences
+        // because the verdict alphabet is [yes/no/irr/part/win], none of which
+        // contain a quote or backslash.
+        guard let keyRange = buffer.range(of: "\"verdict\"") else { return nil }
+        let after = buffer[keyRange.upperBound...]
+        // Skip whitespace + colon
+        var idx = after.startIndex
+        while idx < after.endIndex, after[idx].isWhitespace || after[idx] == ":" {
+            idx = after.index(after: idx)
+        }
+        guard idx < after.endIndex, after[idx] == "\"" else { return nil }
+        idx = after.index(after: idx)
+        let valueStart = idx
+        while idx < after.endIndex, after[idx] != "\"" {
+            idx = after.index(after: idx)
+        }
+        guard idx < after.endIndex else { return nil }   // not yet closed
+        return String(after[valueStart..<idx])
+    }
+
     enum ClaudeError: LocalizedError {
         case apiError(String)
         case emptyResponse

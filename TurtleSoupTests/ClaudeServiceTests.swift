@@ -200,6 +200,105 @@ final class ClaudeServiceTests: XCTestCase {
 
     // MARK: - Error propagation
 
+    // MARK: - Streaming
+
+    func testStreamYieldsVerdictBeforeComplete() async throws {
+        // Verdict arrives in the first delta, comment in the second. Verifies
+        // sendStream emits .verdictReady before .complete (the whole point of
+        // verdict-early-emit) and that the final response carries the full
+        // comment too.
+        MockURLProtocol.requestHandler = { _ in
+            (200,
+             ["Content-Type": "text/event-stream"],
+             anthropicSSEChunkedBody(
+                firstChunk:  #"{"verdict":"yes","comment":""#,
+                secondChunk: #"对了"}"#
+             ))
+        }
+
+        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        var events: [String] = []
+        var finalResponse: ClaudeAgentResponse? = nil
+
+        let stream = service.sendStream(userInput: "x", history: [], puzzle: samplePuzzle())
+        for try await event in stream {
+            switch event {
+            case .verdictReady(let v):
+                events.append("verdict:\(v)")
+            case .complete(let resp):
+                events.append("complete")
+                finalResponse = resp
+            }
+        }
+
+        XCTAssertEqual(events, ["verdict:yes", "complete"],
+                       "verdict must arrive before complete and not be re-emitted")
+        XCTAssertEqual(finalResponse?.verdict, "yes")
+        XCTAssertEqual(finalResponse?.comment, "对了")
+    }
+
+    func testStreamCompletesWithIrrFallbackOnGarbageJSON() async throws {
+        // Model misbehaves and streams non-JSON. The streaming path mirrors
+        // the non-streaming defense: degrade to verdict=irr instead of
+        // failing the call.
+        MockURLProtocol.requestHandler = { _ in
+            (200,
+             ["Content-Type": "text/event-stream"],
+             anthropicSSEBody(verdict: "irr", comment: "") // sentinel — but we'll inject prose
+            )
+        }
+        // Override to emit unstructured prose:
+        MockURLProtocol.requestHandler = { _ in
+            let body = """
+            event: content_block_delta
+            data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"I refuse to JSON"}}
+
+            event: message_stop
+            data: {"type":"message_stop"}
+
+
+            """
+            return (200, ["Content-Type": "text/event-stream"], Data(body.utf8))
+        }
+
+        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        var finalResponse: ClaudeAgentResponse? = nil
+        for try await event in service.sendStream(userInput: "x", history: [], puzzle: samplePuzzle()) {
+            if case .complete(let r) = event { finalResponse = r }
+        }
+        XCTAssertEqual(finalResponse?.verdict, "irr")
+        XCTAssertEqual(finalResponse?.comment, "")
+    }
+
+    func testStreamThrowsAPIErrorOnNon200() async {
+        MockURLProtocol.requestHandler = { _ in (401, [:], Data("denied".utf8)) }
+        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        do {
+            for try await _ in service.sendStream(userInput: "x", history: [], puzzle: samplePuzzle()) {}
+            XCTFail("Expected apiError")
+        } catch let err as ClaudeService.ClaudeError {
+            if case .apiError(let s) = err {
+                XCTAssertTrue(s.contains("denied"))
+            } else {
+                XCTFail("Wrong case: \(err)")
+            }
+        } catch {
+            XCTFail("Wrong type: \(error)")
+        }
+    }
+
+    func testExtractVerdictHandlesPartialBuffer() {
+        // Direct test of the partial-JSON extractor used by the SSE loop.
+        XCTAssertNil(ClaudeService.extractVerdict(from: ""))
+        XCTAssertNil(ClaudeService.extractVerdict(from: #"{"verdict":"#))
+        XCTAssertNil(ClaudeService.extractVerdict(from: #"{"verdict":"y"#),
+                     "open quote without close should not match")
+        XCTAssertEqual(ClaudeService.extractVerdict(from: #"{"verdict":"yes""#), "yes")
+        XCTAssertEqual(ClaudeService.extractVerdict(from: #"{"verdict":"part","comment":""#), "part")
+        // Tolerate whitespace around the colon.
+        XCTAssertEqual(ClaudeService.extractVerdict(from: #"{"verdict" : "no"}"#), "no")
+    }
+
     func testThrowsAPIErrorOnNon200() async {
         let body = #"{"error":{"type":"invalid_request_error","message":"bad key"}}"#.data(using: .utf8)!
         MockURLProtocol.requestHandler = { _ in (401, [:], body) }
@@ -221,30 +320,5 @@ final class ClaudeServiceTests: XCTestCase {
     }
 }
 
-// MARK: - Helpers
-
-private func samplePuzzle() -> Puzzle {
-    Puzzle(
-        id: UUID(),
-        title: "测试题",
-        difficulty: .medium,
-        scenario: "汤面",
-        answer: "汤底关键真相",
-        hint: nil,
-        author: "测试",
-        playCount: 0
-    )
-}
-
-/// Build the outer Anthropic response envelope `{content: [{text: "..."}]}`
-/// where `text` is whatever raw payload you want to roundtrip.
-private func anthropicEnvelope(text: String) -> Data {
-    let env: [String: Any] = ["content": [["text": text]]]
-    return try! JSONSerialization.data(withJSONObject: env)
-}
-
-/// Convenience for the common case: text is the verdict+comment JSON.
-private func anthropicSuccessBody(verdict: String, comment: String) -> Data {
-    let inner = #"{"verdict":"\#(verdict)","comment":"\#(comment)"}"#
-    return anthropicEnvelope(text: inner)
-}
+// Helpers (samplePuzzle, anthropicEnvelope, anthropicSuccessBody) live in
+// TestFixtures.swift so other suites can use them too.
