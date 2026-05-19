@@ -19,9 +19,15 @@ actor PuzzleGenerationService {
     }
 
     private let config: Config
+    private let session: URLSession
 
-    init(config: Config) {
+    /// - Parameters:
+    ///   - config: Proxy base URL + ID Token provider.
+    ///   - session: Customizable for tests (inject a `URLSession` configured
+    ///     with `MockURLProtocol`). Defaults to `.shared`.
+    init(config: Config, session: URLSession = .shared) {
         self.config = config
+        self.session = session
     }
 
     /// Generate a puzzle from a one-line idea.
@@ -45,7 +51,7 @@ actor PuzzleGenerationService {
         req.setValue("Bearer \(token)",   forHTTPHeaderField: "Authorization")
         req.httpBody = bodyData
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw GenerationError.invalidResponse("Not an HTTP response")
         }
