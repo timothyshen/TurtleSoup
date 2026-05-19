@@ -24,6 +24,11 @@ final class GameViewModel {
     /// the progress UI while isGeneratingReview is true; cleared once the
     /// final aiReview lands.
     var reviewProgress: [(field: String, value: String)] = []
+    /// Cached AI review from a previous play of this same puzzle. Loaded
+    /// once at init from GameRecordStore. Surfaced in the answer sheet
+    /// when the current game has no aiReview yet so the player can
+    /// re-read it without paying for regeneration.
+    let pastReview: GameReview?
 
     let puzzle: Puzzle
     private let recordStore: GameRecordStore
@@ -50,6 +55,9 @@ final class GameViewModel {
         self.puzzle = puzzle
         self.claude = claude
         self.isPublicPuzzle = isPublicPuzzle
+        // Snapshot any past review for this puzzle once at construction.
+        // Re-querying on every state change would be wasteful and racy.
+        self.pastReview = recordStore.latestReview(for: puzzle.id)
         self.messages = [
             Message(role: .system,
                     text: "游戏开始——你可以用陈述或问句来探索真相，主持人只回答：是 / 否 / 无关 / 部分正确")

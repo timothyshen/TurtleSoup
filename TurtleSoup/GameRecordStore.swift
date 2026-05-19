@@ -184,6 +184,21 @@ final class GameRecordStore {
         return try? JSONDecoder().decode(GameReview.self, from: data)
     }
 
+    /// Most recent AI review for this puzzle across all past games, if any.
+    /// Used by the answer sheet to surface a cached "上次复盘" when the
+    /// current game hasn't generated one yet — saves a paid round trip
+    /// when the player has already seen a review of the same puzzle.
+    /// Returns nil if no record exists or none of them have a review.
+    func latestReview(for puzzleID: UUID) -> GameReview? {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
+        req.predicate = NSPredicate(format: "puzzleID == %@ AND aiReview != nil",
+                                    puzzleID as CVarArg)
+        req.sortDescriptors = [NSSortDescriptor(key: "endedAt", ascending: false)]
+        req.fetchLimit = 1
+        guard let obj = try? pc.ctx.fetch(req).first else { return nil }
+        return Self.decodeReview(obj)
+    }
+
     /// Fetch the transcript for a saved record, sorted chronologically.
     /// Returns an empty array if the record doesn't exist or has no messages.
     /// Reads the GameMessageEntity rows that saveRecord wrote (or backfilled

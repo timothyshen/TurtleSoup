@@ -323,48 +323,31 @@ struct GameView: View {
             Label("AI 复盘", systemImage: "sparkles")
                 .font(.headline)
 
+            // Priority order matters here. Each branch represents a state
+            // that should never be masked by a less-current one:
+            //   1. aiReview — freshly generated this game; always wins
+            //   2. isGeneratingReview — stream in flight; show progress
+            //   3. reviewError — most recent attempt failed; offer retry.
+            //      Comes BEFORE pastReview so a failed regen doesn't
+            //      silently snap back to the cached one.
+            //   4. pastReview — cache hit from a prior play
+            //   5. default "生成 AI 复盘"
             if let review = vm.aiReview {
                 renderedReview(review)
             } else if vm.isGeneratingReview {
                 reviewProgressPane
+            } else if let err = vm.reviewError {
+                reviewErrorBox(err)
+            } else if let past = vm.pastReview {
+                pastReviewSection(past)
             } else {
-                if let err = vm.reviewError {
-                    // Error state. The same "生成 AI 复盘" button can be
-                    // tapped again to retry, but rebranding it as "重试"
-                    // makes the affordance obvious and grouped with the
-                    // error message instead of looking like an unrelated
-                    // green-field action.
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            Text(err)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Button {
-                            guard let cfg = reviewConfig else { return }
-                            vm.reviewError = nil
-                            vm.startReviewGeneration(config: cfg)
-                        } label: {
-                            Label("重试", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                    .padding(10)
-                    .background(Color.red.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                } else {
-                    Button {
-                        guard let cfg = reviewConfig else { return }
-                        vm.startReviewGeneration(config: cfg)
-                    } label: {
-                        Label("生成 AI 复盘", systemImage: "wand.and.stars")
-                    }
-                    .buttonStyle(.bordered)
+                Button {
+                    guard let cfg = reviewConfig else { return }
+                    vm.startReviewGeneration(config: cfg)
+                } label: {
+                    Label("生成 AI 复盘", systemImage: "wand.and.stars")
                 }
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -412,6 +395,59 @@ struct GameView: View {
             .background(bg)
             .foregroundStyle(fg)
             .clipShape(Capsule())
+    }
+
+    /// Error + retry card. Pulled out so the answer-sheet conditional stays
+    /// readable now that there are five mutually-exclusive review states.
+    private func reviewErrorBox(_ err: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                guard let cfg = reviewConfig else { return }
+                vm.reviewError = nil
+                vm.startReviewGeneration(config: cfg)
+            } label: {
+                Label("重试", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(10)
+        .background(Color.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// Render a previously-cached review with a small caption explaining
+    /// where it came from and a "重新生成" affordance for the current game's
+    /// transcript. Same renderedReview layout — the only difference from a
+    /// freshly-generated review is the label at the top.
+    @ViewBuilder
+    private func pastReviewSection(_ review: GameReview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("上次此题的复盘")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    guard let cfg = reviewConfig else { return }
+                    vm.startReviewGeneration(config: cfg)
+                } label: {
+                    Label("基于本局重新生成", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(reviewConfig == nil)
+            }
+            renderedReview(review)
+        }
     }
 
     /// Progress checklist shown while a review is streaming in. summary and
