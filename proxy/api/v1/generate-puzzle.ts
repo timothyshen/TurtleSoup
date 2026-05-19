@@ -11,6 +11,7 @@
 import { withCORS, preflight } from "../../lib/cors.js";
 import { jsonError } from "../../lib/errors.js";
 import { requireAuth } from "../../lib/auth-middleware.js";
+import { FieldDetector, sseEvent, parseSSEBlock, sseBlocks } from "../../lib/tool-stream.js";
 
 export const config = { runtime: "edge" };
 
@@ -23,7 +24,11 @@ type Difficulty = "简单" | "中等" | "困难";
 interface GenerateRequest {
   idea: string;
   difficulty?: Difficulty;
+  /** When true, returns SSE with progress + complete events instead of one JSON. */
+  stream?: boolean;
 }
+
+const PUZZLE_FIELDS = ["title", "scenario", "answer", "hint", "difficulty"] as const;
 
 interface GeneratedPuzzle {
   title: string;
@@ -153,6 +158,10 @@ export default async function handler(req: Request): Promise<Response> {
 
   const userPrompt = buildUserPrompt(payload);
 
+  if (payload.stream) {
+    return handleStreaming(apiKey, userPrompt);
+  }
+
   let upstream: Response;
   try {
     upstream = await fetch(ANTHROPIC_URL, {
@@ -223,6 +232,127 @@ export default async function handler(req: Request): Promise<Response> {
 
   const puzzle = toolUse.input as GeneratedPuzzle;
   return withCORS(Response.json({ puzzle }));
+}
+
+/**
+ * Streaming variant: opens an SSE response to the client and translates
+ * Anthropic's upstream stream into a simplified `progress` / `complete`
+ * sequence. Progress events fire as each known field of the tool input
+ * finishes; complete fires once at the end with the assembled puzzle.
+ *
+ * If Anthropic returns a non-200, we close the stream with an `error`
+ * event rather than throwing — the client is already mid-iteration and
+ * can't see a different HTTP status.
+ */
+async function handleStreaming(apiKey: string, userPrompt: string): Promise<Response> {
+  let upstream: Response;
+  try {
+    upstream = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 1500,
+        system: [
+          { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        thinking: { type: "disabled" },
+        output_config: { effort: "medium" },
+        tools: [SUBMIT_TOOL],
+        tool_choice: { type: "tool", name: "submit_puzzle" },
+        stream: true,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+    });
+  } catch (e) {
+    return withCORS(
+      jsonError(502, "upstream_unreachable", `Failed to reach Anthropic: ${(e as Error).message}`),
+    );
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    const errText = upstream.body ? await upstream.text() : "no body";
+    return withCORS(jsonError(upstream.status, "upstream_error", errText.slice(0, 500)));
+  }
+
+  // Pipe through a TransformStream so we can write progress events as we go
+  // and the client receives them in real time. Edge runtime is ReadableStream-
+  // native — no Node Buffer dance needed.
+  const detector = new FieldDetector(PUZZLE_FIELDS);
+  const encoder = new TextEncoder();
+  const upstreamBody = upstream.body;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const block of sseBlocks(upstreamBody)) {
+          const parsed = parseSSEBlock(block);
+          if (!parsed) continue;
+
+          // Anthropic's tool_use stream sends input deltas as
+          // {type: "content_block_delta", delta: {type: "input_json_delta", partial_json: "..."}}
+          const data = parsed.data as {
+            type?: string;
+            delta?: { type?: string; partial_json?: string };
+          };
+
+          if (data.type === "content_block_delta" &&
+              data.delta?.type === "input_json_delta" &&
+              typeof data.delta.partial_json === "string") {
+            const newlyClosed = detector.push(data.delta.partial_json);
+            for (const event of newlyClosed) {
+              controller.enqueue(encoder.encode(sseEvent({ name: "progress", data: event })));
+            }
+          } else if (data.type === "message_stop") {
+            // Final parse: the accumulated buffer should be the complete
+            // tool input JSON. If parsing fails we still emit an error
+            // event rather than letting the client hang.
+            try {
+              const puzzle = JSON.parse(detector.full()) as Record<string, unknown>;
+              controller.enqueue(
+                encoder.encode(sseEvent({ name: "complete", data: { puzzle } })),
+              );
+            } catch (e) {
+              controller.enqueue(
+                encoder.encode(sseEvent({
+                  name: "error",
+                  data: {
+                    code: "parse_failed",
+                    message: `Tool input did not parse: ${(e as Error).message}`,
+                  },
+                })),
+              );
+            }
+            controller.close();
+            return;
+          }
+        }
+        // Stream ended without a message_stop — best-effort close.
+        controller.close();
+      } catch (e) {
+        controller.enqueue(
+          encoder.encode(sseEvent({
+            name: "error",
+            data: { code: "stream_failed", message: (e as Error).message },
+          })),
+        );
+        controller.close();
+      }
+    },
+  });
+
+  return withCORS(new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+    },
+  }));
 }
 
 function buildUserPrompt(req: GenerateRequest): string {

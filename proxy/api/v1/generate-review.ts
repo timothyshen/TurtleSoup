@@ -11,6 +11,7 @@
 import { withCORS, preflight } from "../../lib/cors.js";
 import { jsonError } from "../../lib/errors.js";
 import { requireAuth } from "../../lib/auth-middleware.js";
+import { FieldDetector, sseEvent, parseSSEBlock, sseBlocks } from "../../lib/tool-stream.js";
 
 export const config = { runtime: "edge" };
 
@@ -35,7 +36,15 @@ interface ReviewRequest {
   transcript: TranscriptTurn[];
   isWon: boolean;
   questionCount: number;
+  /** When true, returns SSE with progress + complete events instead of one JSON. */
+  stream?: boolean;
 }
+
+// Review tool_use schema has summary + key_moments[] + tip. key_moments
+// is an array of objects so it doesn't surface as a closed "string field"
+// from the detector — that's OK, we only care about driving summary and
+// tip progress (the long ones).
+const REVIEW_FIELDS = ["summary", "tip"] as const;
 
 const SYSTEM_PROMPT = `你是一位海龟汤游戏的复盘教练。游戏结束后，玩家会带着完整对话历史来找你复盘。
 
@@ -127,6 +136,10 @@ export default async function handler(req: Request): Promise<Response> {
 
   const userPrompt = buildUserPrompt(payload);
 
+  if (payload.stream) {
+    return handleStreaming(apiKey, userPrompt);
+  }
+
   let upstream: Response;
   try {
     upstream = await fetch(ANTHROPIC_URL, {
@@ -184,6 +197,109 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   return withCORS(Response.json({ review: toolUse.input }));
+}
+
+/** See `handleStreaming` in generate-puzzle.ts for the design rationale. */
+async function handleStreaming(apiKey: string, userPrompt: string): Promise<Response> {
+  let upstream: Response;
+  try {
+    upstream = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 1200,
+        system: [
+          { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        thinking: { type: "disabled" },
+        output_config: { effort: "medium" },
+        tools: [SUBMIT_TOOL],
+        tool_choice: { type: "tool", name: "submit_review" },
+        stream: true,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+    });
+  } catch (e) {
+    return withCORS(
+      jsonError(502, "upstream_unreachable", `Failed to reach Anthropic: ${(e as Error).message}`),
+    );
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    const errText = upstream.body ? await upstream.text() : "no body";
+    return withCORS(jsonError(upstream.status, "upstream_error", errText.slice(0, 500)));
+  }
+
+  const detector = new FieldDetector(REVIEW_FIELDS);
+  const encoder = new TextEncoder();
+  const upstreamBody = upstream.body;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const block of sseBlocks(upstreamBody)) {
+          const parsed = parseSSEBlock(block);
+          if (!parsed) continue;
+
+          const data = parsed.data as {
+            type?: string;
+            delta?: { type?: string; partial_json?: string };
+          };
+
+          if (data.type === "content_block_delta" &&
+              data.delta?.type === "input_json_delta" &&
+              typeof data.delta.partial_json === "string") {
+            const newlyClosed = detector.push(data.delta.partial_json);
+            for (const event of newlyClosed) {
+              controller.enqueue(encoder.encode(sseEvent({ name: "progress", data: event })));
+            }
+          } else if (data.type === "message_stop") {
+            try {
+              const review = JSON.parse(detector.full()) as Record<string, unknown>;
+              controller.enqueue(
+                encoder.encode(sseEvent({ name: "complete", data: { review } })),
+              );
+            } catch (e) {
+              controller.enqueue(
+                encoder.encode(sseEvent({
+                  name: "error",
+                  data: {
+                    code: "parse_failed",
+                    message: `Tool input did not parse: ${(e as Error).message}`,
+                  },
+                })),
+              );
+            }
+            controller.close();
+            return;
+          }
+        }
+        controller.close();
+      } catch (e) {
+        controller.enqueue(
+          encoder.encode(sseEvent({
+            name: "error",
+            data: { code: "stream_failed", message: (e as Error).message },
+          })),
+        );
+        controller.close();
+      }
+    },
+  });
+
+  return withCORS(new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+    },
+  }));
 }
 
 function buildUserPrompt(req: ReviewRequest): string {
