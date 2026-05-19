@@ -17,16 +17,23 @@ actor ClaudeService {
     }
 
     private let transport: Transport
+    private let session: URLSession
     private static let anthropicDirectURL =
         URL(string: "https://api.anthropic.com/v1/messages")!
 
-    init(transport: Transport) {
+    /// - Parameters:
+    ///   - transport: Direct (with API key) or proxy (with baseURL + token provider).
+    ///   - session: Customizable for tests (inject a `URLSession` configured
+    ///     with `MockURLProtocol`). Defaults to `.shared`.
+    init(transport: Transport, session: URLSession = .shared) {
         self.transport = transport
+        self.session = session
     }
 
     /// Backwards-compatible convenience for callers that still pass a raw API key.
     init(apiKey: String) {
         self.transport = .direct(apiKey: apiKey)
+        self.session = .shared
     }
 
     // MARK: - System prompt builder
@@ -83,7 +90,7 @@ actor ClaudeService {
         ]
 
         let request = try await buildRequest(body: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let errText = String(data: data, encoding: .utf8) ?? "unknown"
