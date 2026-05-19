@@ -41,6 +41,16 @@ struct FirestoreService: FirestoreServicing {
            let jsonStr = String(data: json, encoding: .utf8) {
             data["aiReview"] = jsonStr
         }
+        // Persist transcript as a JSON blob too. Lets a second device see
+        // what was asked/answered without us having to denormalize messages
+        // into a sub-collection. 50-turn game ≈ 5KB — comfortably under the
+        // 1MB document cap. Skip when empty (e.g. records pulled via
+        // syncFromFirestore, which carry no messages).
+        if !record.messages.isEmpty,
+           let json = try? JSONEncoder().encode(record.messages),
+           let jsonStr = String(data: json, encoding: .utf8) {
+            data["messagesJSON"] = jsonStr
+        }
         do {
             // Use record.id (UUID) as the document ID to avoid timeInterval precision collisions
             try await recordsRef(uid)
@@ -88,6 +98,15 @@ struct FirestoreService: FirestoreServicing {
                    let data = jsonStr.data(using: .utf8) {
                     review = try? JSONDecoder().decode(GameReview.self, from: data)
                 }
+                // messagesJSON: same shape as aiReview — missing or malformed
+                // degrades to an empty transcript so the rest of the record
+                // still loads. Empty array is a valid state (pre-N2 records).
+                var messages: [Message] = []
+                if let jsonStr = d["messagesJSON"] as? String,
+                   let data = jsonStr.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode([Message].self, from: data) {
+                    messages = decoded
+                }
                 return GameRecord(
                     id:            id,
                     puzzleID:      puzzleID,
@@ -96,7 +115,7 @@ struct FirestoreService: FirestoreServicing {
                     endedAt:       endTS.dateValue(),
                     isWon:         isWon,
                     questionCount: qCount,
-                    messages:      [],
+                    messages:      messages,
                     aiReview:      review
                 )
             }

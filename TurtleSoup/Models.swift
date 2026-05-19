@@ -57,14 +57,14 @@ struct Puzzle: Identifiable, Codable, Hashable {
 
 // MARK: - Message
 
-struct Message: Identifiable {
+struct Message: Identifiable, Codable, Equatable {
     let id: UUID
     let role: Role
     let text: String
     var verdict: Verdict?
     let timestamp: Date
 
-    enum Role: String {
+    enum Role: String, Codable {
         case user      = "user"
         case assistant = "assistant"
         case system    = "system"
@@ -104,6 +104,18 @@ struct Message: Identifiable {
         self.text = text
         self.verdict = verdict
         self.timestamp = Date()
+    }
+
+    /// Full memberwise init for restoring messages from persistent storage
+    /// (CoreData rows, Firestore JSON blobs) where id and timestamp need to
+    /// be preserved verbatim. Not for new in-game messages — those should
+    /// use the role/text init above so id/timestamp auto-populate.
+    init(id: UUID, role: Role, text: String, verdict: Verdict?, timestamp: Date) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.verdict = verdict
+        self.timestamp = timestamp
     }
 }
 

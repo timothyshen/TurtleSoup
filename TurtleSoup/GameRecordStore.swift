@@ -64,9 +64,34 @@ final class GameRecordStore {
                                     record.startedAt as NSDate)
         dup.fetchLimit = 1
         if let existing = try? ctx.fetch(dup), let existingObj = existing.first {
+            var didUpdate = false
             if existingObj.value(forKey: "aiReview") == nil,
                let incoming = Self.encodeReview(record.aiReview) {
                 existingObj.setValue(incoming, forKey: "aiReview")
+                didUpdate = true
+            }
+            // Backfill transcript from remote when local row has none. Covers
+            // the cross-device sync case: device B fetched the record before
+            // we started storing messagesJSON in Firestore, so its local row
+            // is metadata-only. Now the remote carries messages — copy them in.
+            let existingMessages = existingObj.value(forKey: "messages") as? Set<NSManagedObject>
+            if (existingMessages?.isEmpty ?? true) && !record.messages.isEmpty {
+                var msgSet = Set<NSManagedObject>()
+                for msg in record.messages {
+                    let msgObj = NSEntityDescription.insertNewObject(
+                        forEntityName: "GameMessageEntity", into: ctx)
+                    msgObj.setValue(msg.id,                forKey: "id")
+                    msgObj.setValue(msg.role.rawValue,     forKey: "role")
+                    msgObj.setValue(msg.text,              forKey: "text")
+                    msgObj.setValue(msg.verdict?.rawValue, forKey: "verdict")
+                    msgObj.setValue(msg.timestamp,         forKey: "timestamp")
+                    msgObj.setValue(existingObj,           forKey: "record")
+                    msgSet.insert(msgObj)
+                }
+                existingObj.setValue(msgSet, forKey: "messages")
+                didUpdate = true
+            }
+            if didUpdate {
                 pc.save()
                 savedRecordCount += 1
             }
@@ -152,6 +177,32 @@ final class GameRecordStore {
         guard let raw = obj.value(forKey: "aiReview") as? String,
               let data = raw.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(GameReview.self, from: data)
+    }
+
+    /// Fetch the transcript for a saved record, sorted chronologically.
+    /// Returns an empty array if the record doesn't exist or has no messages.
+    /// Reads the GameMessageEntity rows that saveRecord wrote (or backfilled
+    /// from Firestore via messagesJSON on sync).
+    func messages(for recordID: UUID) -> [Message] {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
+        req.predicate = NSPredicate(format: "id == %@", recordID as CVarArg)
+        req.fetchLimit = 1
+        guard let recObj = try? pc.ctx.fetch(req).first,
+              let set = recObj.value(forKey: "messages") as? Set<NSManagedObject>
+        else { return [] }
+
+        return set.compactMap { obj -> Message? in
+            guard let roleRaw = obj.value(forKey: "role") as? String,
+                  let role    = Message.Role(rawValue: roleRaw),
+                  let text    = obj.value(forKey: "text") as? String,
+                  let id      = obj.value(forKey: "id") as? UUID,
+                  let ts      = obj.value(forKey: "timestamp") as? Date
+            else { return nil }
+            let verdict = (obj.value(forKey: "verdict") as? String)
+                .flatMap(Message.Verdict.init(rawValue:))
+            return Message(id: id, role: role, text: text, verdict: verdict, timestamp: ts)
+        }
+        .sorted { $0.timestamp < $1.timestamp }
     }
 
     /// Convenience for lookups by record id — used by GameView's answer sheet
