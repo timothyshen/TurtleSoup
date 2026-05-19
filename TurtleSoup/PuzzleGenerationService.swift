@@ -64,6 +64,113 @@ actor PuzzleGenerationService {
         return decoded.puzzle.toPuzzle()
     }
 
+    // MARK: - Streaming
+
+    enum StreamEvent {
+        /// A top-level field of the puzzle finished streaming. UI uses this
+        /// to flip a checkmark on a progress list.
+        case progress(field: String, value: String)
+        /// Final assembled puzzle, ready for the editor. Stream terminates
+        /// after this fires.
+        case complete(Puzzle)
+    }
+
+    /// Streaming variant of `generate`. Same shape as the non-streaming
+    /// method but yields `StreamEvent`s as the proxy reports field-close
+    /// events from Anthropic.
+    func generateStream(idea: String, difficulty: Puzzle.Difficulty?) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.runGenerationStream(
+                        idea: idea, difficulty: difficulty, continuation: continuation
+                    )
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func runGenerationStream(
+        idea: String,
+        difficulty: Puzzle.Difficulty?,
+        continuation: AsyncThrowingStream<StreamEvent, Error>.Continuation
+    ) async throws {
+        let endpoint = config.baseURL.appendingPathComponent("api/v1/generate-puzzle")
+        var body: [String: Any] = ["idea": idea, "stream": true]
+        if let difficulty { body["difficulty"] = difficulty.rawValue }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        let token = try await config.idTokenProvider()
+
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)",  forHTTPHeaderField: "Authorization")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.httpBody = bodyData
+
+        let (bytes, response) = try await session.bytes(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw GenerationError.invalidResponse("Not an HTTP response")
+        }
+        guard http.statusCode == 200 else {
+            // Drain a bounded amount of body for diagnostics.
+            var errData = Data()
+            for try await byte in bytes {
+                errData.append(byte)
+                if errData.count > 4096 { break }
+            }
+            let errText = String(data: errData, encoding: .utf8) ?? "unknown"
+            throw GenerationError.serverError(http.statusCode, errText)
+        }
+
+        for try await event in ProxyStreamReader.events(from: bytes) {
+            switch event {
+            case .progress(let field, let value):
+                continuation.yield(.progress(field: field, value: value))
+            case .complete(let payload):
+                guard let puzzleDict = payload["puzzle"] as? [String: Any],
+                      let puzzle = Self.decodePuzzleDict(puzzleDict) else {
+                    throw GenerationError.invalidResponse("Missing or malformed puzzle in complete event")
+                }
+                continuation.yield(.complete(puzzle))
+                continuation.finish()
+                return
+            case .error(let code, let message):
+                throw GenerationError.serverError(0, "{\"error\":{\"code\":\"\(code)\",\"message\":\"\(message)\"}}")
+            }
+        }
+        // Stream ended without complete — best-effort failure.
+        throw GenerationError.invalidResponse("Stream ended without complete event")
+    }
+
+    /// Build a `Puzzle` from the dict payload of a complete event.
+    /// nonisolated so it's callable without an actor hop.
+    nonisolated private static func decodePuzzleDict(_ d: [String: Any]) -> Puzzle? {
+        guard
+            let title    = d["title"]    as? String,
+            let scenario = d["scenario"] as? String,
+            let answer   = d["answer"]   as? String,
+            let diffRaw  = d["difficulty"] as? String
+        else { return nil }
+        let diff = Puzzle.Difficulty(rawValue: diffRaw) ?? .medium
+        let hint = d["hint"] as? String
+        return Puzzle(
+            id: UUID(),
+            title: title,
+            difficulty: diff,
+            scenario: scenario,
+            answer: answer,
+            hint: hint?.isEmpty == false ? hint : nil,
+            author: "AI",
+            playCount: 0
+        )
+    }
+
     // MARK: - Wire types
 
     private struct GenerateResponse: Decodable {

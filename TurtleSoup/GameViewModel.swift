@@ -20,6 +20,10 @@ final class GameViewModel {
     var aiReview: GameReview? = nil
     var isGeneratingReview: Bool = false
     var reviewError: String? = nil
+    /// Streamed-in review fields (summary / tip) in arrival order. Drives
+    /// the progress UI while isGeneratingReview is true; cleared once the
+    /// final aiReview lands.
+    var reviewProgress: [(field: String, value: String)] = []
 
     let puzzle: Puzzle
     private let recordStore: GameRecordStore
@@ -168,6 +172,8 @@ final class GameViewModel {
 
     /// Generate a post-game AI review and persist it onto the saved record.
     /// No-op if a review already exists or no record has been saved (mid-game).
+    /// Streams progress events so the answer sheet can render a per-field
+    /// checklist instead of a blank spinner.
     func generateReview(config: ReviewService.Config) async {
         guard aiReview == nil, !isGeneratingReview else { return }
         guard let recordID = lastSavedRecordID else {
@@ -177,18 +183,28 @@ final class GameViewModel {
 
         isGeneratingReview = true
         reviewError = nil
+        reviewProgress = []
         defer { isGeneratingReview = false }
 
         do {
             let service = ReviewService(config: config)
-            let review = try await service.generate(
+            let stream = service.generateStream(
                 puzzle: puzzle,
                 messages: messages.filter { $0.role != .system },
                 isWon: isGameWon,
                 questionCount: questionCount
             )
-            recordStore.updateAIReview(recordID: recordID, review: review)
-            aiReview = review
+            for try await event in stream {
+                switch event {
+                case .progress(let field, let value):
+                    if !reviewProgress.contains(where: { $0.field == field }) {
+                        reviewProgress.append((field: field, value: value))
+                    }
+                case .complete(let review):
+                    recordStore.updateAIReview(recordID: recordID, review: review)
+                    aiReview = review
+                }
+            }
         } catch {
             reviewError = error.localizedDescription
         }

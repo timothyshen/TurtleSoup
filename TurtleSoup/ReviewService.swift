@@ -131,6 +131,116 @@ actor ReviewService {
         return decoded.review
     }
 
+    // MARK: - Streaming
+
+    enum StreamEvent {
+        case progress(field: String, value: String)
+        case complete(GameReview)
+    }
+
+    /// Streaming variant of `generate`. The proxy emits `progress` events
+    /// for `summary` and `tip` (the long string fields) as they close, plus
+    /// a final `complete` carrying the assembled `GameReview`. The
+    /// `key_moments` array doesn't fire progress events — it arrives all
+    /// at once inside the `complete` payload.
+    func generateStream(
+        puzzle: Puzzle,
+        messages: [Message],
+        isWon: Bool,
+        questionCount: Int
+    ) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.runReviewStream(
+                        puzzle: puzzle, messages: messages,
+                        isWon: isWon, questionCount: questionCount,
+                        continuation: continuation
+                    )
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func runReviewStream(
+        puzzle: Puzzle,
+        messages: [Message],
+        isWon: Bool,
+        questionCount: Int,
+        continuation: AsyncThrowingStream<StreamEvent, Error>.Continuation
+    ) async throws {
+        let endpoint = config.baseURL.appendingPathComponent("api/v1/generate-review")
+
+        let transcript: [[String: Any]] = messages.compactMap { msg in
+            switch msg.role {
+            case .user:      return ["role": "user", "text": msg.text]
+            case .assistant:
+                var t: [String: Any] = ["role": "assistant", "text": msg.text]
+                if let v = msg.verdict { t["verdict"] = v.rawValue }
+                return t
+            case .system:    return nil
+            }
+        }
+        let body: [String: Any] = [
+            "puzzle": [
+                "title":    puzzle.title,
+                "scenario": puzzle.scenario,
+                "answer":   puzzle.answer,
+            ],
+            "transcript":    transcript,
+            "isWon":         isWon,
+            "questionCount": questionCount,
+            "stream":        true,
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        let token = try await config.idTokenProvider()
+
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json",  forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)",   forHTTPHeaderField: "Authorization")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.httpBody = bodyData
+
+        let (bytes, response) = try await session.bytes(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw ReviewError.invalidResponse("Not an HTTP response")
+        }
+        guard http.statusCode == 200 else {
+            var errData = Data()
+            for try await byte in bytes {
+                errData.append(byte)
+                if errData.count > 4096 { break }
+            }
+            let errText = String(data: errData, encoding: .utf8) ?? "unknown"
+            throw ReviewError.serverError(http.statusCode, errText)
+        }
+
+        for try await event in ProxyStreamReader.events(from: bytes) {
+            switch event {
+            case .progress(let field, let value):
+                continuation.yield(.progress(field: field, value: value))
+            case .complete(let payload):
+                guard let reviewDict = payload["review"] as? [String: Any],
+                      let data = try? JSONSerialization.data(withJSONObject: reviewDict),
+                      let review = try? JSONDecoder().decode(GameReview.self, from: data) else {
+                    throw ReviewError.invalidResponse("Missing or malformed review in complete event")
+                }
+                continuation.yield(.complete(review))
+                continuation.finish()
+                return
+            case .error(let code, let message):
+                throw ReviewError.serverError(0, "{\"error\":{\"code\":\"\(code)\",\"message\":\"\(message)\"}}")
+            }
+        }
+        throw ReviewError.invalidResponse("Stream ended without complete event")
+    }
+
     // MARK: - Wire types
 
     private struct ReviewResponse: Decodable {

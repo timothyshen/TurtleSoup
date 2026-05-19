@@ -326,10 +326,7 @@ struct GameView: View {
             if let review = vm.aiReview {
                 renderedReview(review)
             } else if vm.isGeneratingReview {
-                HStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
-                    Text("正在复盘…").foregroundStyle(.secondary).font(.callout)
-                }
+                reviewProgressPane
             } else {
                 if let err = vm.reviewError {
                     Text(err)
@@ -390,6 +387,55 @@ struct GameView: View {
             .background(bg)
             .foregroundStyle(fg)
             .clipShape(Capsule())
+    }
+
+    /// Progress checklist shown while a review is streaming in. summary and
+    /// tip are the only fields the proxy emits progress for (key_moments[]
+    /// arrives all at once in the complete event).
+    private var reviewProgressPane: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("正在复盘…")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                reviewProgressRow(label: "总评", key: "summary")
+                reviewProgressRow(label: "关键时刻", key: "key_moments", trailingNote: "随完整结果一起返回")
+                reviewProgressRow(label: "下次建议", key: "tip")
+            }
+            .padding(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            )
+        }
+    }
+
+    private func reviewProgressRow(label: String, key: String, trailingNote: String? = nil) -> some View {
+        let value = vm.reviewProgress.first(where: { $0.field == key })?.value
+        let done = value != nil
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle.dotted")
+                .foregroundStyle(done ? Color.green : Color.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(done ? .primary : .secondary)
+                if let v = value {
+                    Text(v)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                } else if let note = trailingNote {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
     }
 
     private func momentStyle(_ kind: GameReview.Moment.Kind) -> (bg: Color, fg: Color, symbol: String) {
