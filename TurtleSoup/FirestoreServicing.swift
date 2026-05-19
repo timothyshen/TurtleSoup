@@ -4,6 +4,7 @@ import Foundation
 protocol FirestoreServicing {
     func saveRecord(_ record: GameRecord, uid: String) async
     func fetchRecords(uid: String) async -> [GameRecord]
+    func updateAIReview(recordID: UUID, review: GameReview, uid: String) async
     func savePuzzle(_ puzzle: Puzzle, uid: String) async
     func deletePuzzle(id: UUID, uid: String) async
     func fetchUserPuzzles(uid: String) async -> [Puzzle]

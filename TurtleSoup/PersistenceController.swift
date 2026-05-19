@@ -50,6 +50,11 @@ final class PersistenceController {
             attr("endedAt",       .dateAttributeType,      optional: true),
             attr("isWon",         .booleanAttributeType,   optional: false),
             attr("questionCount", .integer32AttributeType, optional: false),
+            // JSON-encoded GameReview. Optional because reviews are generated
+            // on demand by the player tapping the button, not on every game.
+            // Storing as a single JSON blob keeps the schema flat — adding a
+            // new field to GameReview doesn't require a CoreData migration.
+            attr("aiReview",      .stringAttributeType,    optional: true),
         ])
 
         let messageE = entity("GameMessageEntity", attrs: [

@@ -34,8 +34,13 @@ struct RootView: View {
             switch sidebarTab {
             case .library, .square:
                 if let puzzle = selectedPuzzle {
-                    GameView(puzzle: puzzle, transport: makeTransport(), recordStore: recordStore)
-                        .id(puzzle.id)
+                    GameView(
+                        puzzle: puzzle,
+                        transport: makeTransport(),
+                        recordStore: recordStore,
+                        reviewConfig: makeReviewConfig()
+                    )
+                    .id(puzzle.id)
                 } else {
                     EmptyDetailView()
                 }
@@ -88,6 +93,18 @@ struct RootView: View {
             return nil
         }
         return PuzzleGenerationService.Config(baseURL: url) { [authService] in
+            try await authService.getIDToken()
+        }
+    }
+
+    /// Same gating as makeGeneratorConfig — review generation also lives on
+    /// the proxy. Returns nil if proxy isn't configured, which hides the
+    /// "生成 AI 复盘" button entirely rather than showing a non-functional one.
+    private func makeReviewConfig() -> ReviewService.Config? {
+        guard !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) else {
+            return nil
+        }
+        return ReviewService.Config(baseURL: url) { [authService] in
             try await authService.getIDToken()
         }
     }

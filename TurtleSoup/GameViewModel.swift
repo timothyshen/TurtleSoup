@@ -14,10 +14,20 @@ final class GameViewModel {
     var errorMessage: String? = nil
     var showAnswer: Bool = false
 
+    // AI review state — populated when the player taps "生成 AI 复盘" in
+    // the answer sheet. Kept in-memory for the current session and persisted
+    // through recordStore.updateAIReview on success.
+    var aiReview: GameReview? = nil
+    var isGeneratingReview: Bool = false
+    var reviewError: String? = nil
+
     let puzzle: Puzzle
     private let recordStore: GameRecordStore
     private let startedAt: Date = Date()
     private let claude: ClaudeService
+    /// Set after the first persistRecord call so generateReview knows which
+    /// CoreData row to attach the review to.
+    private var lastSavedRecordID: UUID? = nil
 
     init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
         self.recordStore = recordStore
@@ -81,6 +91,37 @@ final class GameViewModel {
             questionCount: questionCount,
             messages:      messages.filter { $0.role != .system }
         )
+        lastSavedRecordID = record.id
         recordStore.saveRecord(record)
+    }
+
+    // MARK: - AI review
+
+    /// Generate a post-game AI review and persist it onto the saved record.
+    /// No-op if a review already exists or no record has been saved (mid-game).
+    func generateReview(config: ReviewService.Config) async {
+        guard aiReview == nil, !isGeneratingReview else { return }
+        guard let recordID = lastSavedRecordID else {
+            // Should only happen if called before persistRecord — bail quietly.
+            return
+        }
+
+        isGeneratingReview = true
+        reviewError = nil
+        defer { isGeneratingReview = false }
+
+        do {
+            let service = ReviewService(config: config)
+            let review = try await service.generate(
+                puzzle: puzzle,
+                messages: messages.filter { $0.role != .system },
+                isWon: isGameWon,
+                questionCount: questionCount
+            )
+            recordStore.updateAIReview(recordID: recordID, review: review)
+            aiReview = review
+        } catch {
+            reviewError = error.localizedDescription
+        }
     }
 }

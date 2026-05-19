@@ -22,6 +22,10 @@ final class MockFirestoreService: FirestoreServicing {
     func fetchRecords(uid: String) async -> [GameRecord] {
         stubbedRecords
     }
+    var aiReviewUpdates: [(UUID, GameReview)] = []
+    func updateAIReview(recordID: UUID, review: GameReview, uid: String) async {
+        aiReviewUpdates.append((recordID, review))
+    }
     func savePuzzle(_ puzzle: Puzzle, uid: String) async {
         savedPuzzles.append(puzzle)
     }

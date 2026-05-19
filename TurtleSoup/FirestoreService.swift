@@ -25,7 +25,7 @@ struct FirestoreService: FirestoreServicing {
     // MARK: - Game Records
 
     func saveRecord(_ record: GameRecord, uid: String) async {
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "id":            record.id.uuidString,
             "puzzleID":      record.puzzleID.uuidString,
             "puzzleTitle":   record.puzzleTitle,
@@ -34,6 +34,13 @@ struct FirestoreService: FirestoreServicing {
             "isWon":         record.isWon,
             "questionCount": record.questionCount
         ]
+        // Persist AI review as JSON string. Keeps schema flat — adding new
+        // GameReview fields doesn't require a Firestore schema change.
+        if let review = record.aiReview,
+           let json = try? JSONEncoder().encode(review),
+           let jsonStr = String(data: json, encoding: .utf8) {
+            data["aiReview"] = jsonStr
+        }
         do {
             // Use record.id (UUID) as the document ID to avoid timeInterval precision collisions
             try await recordsRef(uid)
@@ -41,6 +48,21 @@ struct FirestoreService: FirestoreServicing {
                 .setData(data, merge: true)
         } catch {
             logger.error("Firestore saveRecord failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func updateAIReview(recordID: UUID, review: GameReview, uid: String) async {
+        guard let json = try? JSONEncoder().encode(review),
+              let jsonStr = String(data: json, encoding: .utf8) else {
+            logger.error("Firestore updateAIReview: failed to encode review")
+            return
+        }
+        do {
+            try await recordsRef(uid)
+                .document(recordID.uuidString)
+                .setData(["aiReview": jsonStr], merge: true)
+        } catch {
+            logger.error("Firestore updateAIReview failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -60,6 +82,12 @@ struct FirestoreService: FirestoreServicing {
                     let isWon    = d["isWon"]          as? Bool,
                     let qCount   = d["questionCount"]  as? Int
                 else { return nil }
+                // aiReview is optional; tolerate it being missing or malformed.
+                var review: GameReview? = nil
+                if let jsonStr = d["aiReview"] as? String,
+                   let data = jsonStr.data(using: .utf8) {
+                    review = try? JSONDecoder().decode(GameReview.self, from: data)
+                }
                 return GameRecord(
                     id:            id,
                     puzzleID:      puzzleID,
@@ -68,7 +96,8 @@ struct FirestoreService: FirestoreServicing {
                     endedAt:       endTS.dateValue(),
                     isWon:         isWon,
                     questionCount: qCount,
-                    messages:      []
+                    messages:      [],
+                    aiReview:      review
                 )
             }
         } catch {

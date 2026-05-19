@@ -5,11 +5,16 @@ struct GameView: View {
     @State private var vm: GameViewModel
     @State private var recordStore: GameRecordStore
 
+    /// Optional; if nil the "生成 AI 复盘" button is hidden (proxy not configured
+    /// or user not signed in).
+    let reviewConfig: ReviewService.Config?
+
     @FocusState private var inputFocused: Bool
 
-    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
+    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore, reviewConfig: ReviewService.Config? = nil) {
         _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, transport: transport, recordStore: recordStore))
         _recordStore = State(wrappedValue: recordStore)
+        self.reviewConfig = reviewConfig
     }
 
     var body: some View {
@@ -293,6 +298,12 @@ struct GameView: View {
                 .frame(maxHeight: 200)
             }
 
+            // AI 复盘 section — only available when a proxy is configured.
+            if reviewConfig != nil {
+                Divider()
+                reviewSection
+            }
+
             HStack {
                 Spacer()
                 Button("完成") { vm.showAnswer = false }
@@ -302,6 +313,92 @@ struct GameView: View {
         }
         .padding(24)
         .frame(width: 480)
+    }
+
+    // MARK: - AI review
+
+    @ViewBuilder
+    private var reviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("AI 复盘", systemImage: "sparkles")
+                .font(.headline)
+
+            if let review = vm.aiReview {
+                renderedReview(review)
+            } else if vm.isGeneratingReview {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("正在复盘…").foregroundStyle(.secondary).font(.callout)
+                }
+            } else {
+                if let err = vm.reviewError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Button {
+                    guard let cfg = reviewConfig else { return }
+                    Task { await vm.generateReview(config: cfg) }
+                } label: {
+                    Label("生成 AI 复盘", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func renderedReview(_ review: GameReview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(review.summary)
+                .font(.body.weight(.medium))
+
+            ForEach(review.keyMoments) { moment in
+                HStack(alignment: .top, spacing: 8) {
+                    momentBadge(moment.kind)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("第 \(moment.turn) 轮")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(moment.comment)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "lightbulb")
+                    .foregroundStyle(.orange)
+                Text(review.tip)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func momentBadge(_ kind: GameReview.Moment.Kind) -> some View {
+        let (bg, fg, sym) = momentStyle(kind)
+        return Label(kind.label, systemImage: sym)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(bg)
+            .foregroundStyle(fg)
+            .clipShape(Capsule())
+    }
+
+    private func momentStyle(_ kind: GameReview.Moment.Kind) -> (bg: Color, fg: Color, symbol: String) {
+        switch kind {
+        case .goodQuestion:   return (.green.opacity(0.15), .green,  "checkmark.circle")
+        case .wrongDirection: return (.red.opacity(0.15),   .red,    "arrow.uturn.left")
+        case .breakthrough:   return (.teal.opacity(0.15),  .teal,   "sparkle")
+        case .gotStuck:       return (.orange.opacity(0.15),.orange, "pause.circle")
+        }
     }
 
     private func answerStat(label: String, value: String) -> some View {

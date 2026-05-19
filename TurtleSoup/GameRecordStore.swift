@@ -11,12 +11,16 @@ struct GameRecord {
     let isWon: Bool
     let questionCount: Int
     let messages: [Message]
+    /// AI-generated post-game review. nil until the player taps "生成 AI 复盘"
+    /// and the proxy call returns. Cached locally so it isn't regenerated.
+    var aiReview: GameReview?
 
     init(id: UUID = UUID(),
          puzzleID: UUID, puzzleTitle: String,
          startedAt: Date, endedAt: Date,
          isWon: Bool, questionCount: Int,
-         messages: [Message]) {
+         messages: [Message],
+         aiReview: GameReview? = nil) {
         self.id            = id
         self.puzzleID      = puzzleID
         self.puzzleTitle   = puzzleTitle
@@ -25,6 +29,7 @@ struct GameRecord {
         self.isWon         = isWon
         self.questionCount = questionCount
         self.messages      = messages
+        self.aiReview      = aiReview
     }
 }
 
@@ -48,23 +53,39 @@ final class GameRecordStore {
     func saveRecord(_ record: GameRecord) {
         let ctx = pc.ctx
 
-        // Dedup: skip if same puzzleID + startedAt already exists
+        // Dedup: skip if same puzzleID + startedAt already exists.
+        // On hit, backfill aiReview from the remote/incoming record if the
+        // existing row doesn't have one — fixes the sync case where the
+        // record was created locally, then the player generated a review on
+        // another device, and we're now pulling it back.
         let dup = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
         dup.predicate = NSPredicate(format: "puzzleID == %@ AND startedAt == %@",
                                     record.puzzleID as CVarArg,
                                     record.startedAt as NSDate)
         dup.fetchLimit = 1
-        if let existing = try? ctx.fetch(dup), !existing.isEmpty { return }
+        if let existing = try? ctx.fetch(dup), let existingObj = existing.first {
+            if existingObj.value(forKey: "aiReview") == nil,
+               let incoming = Self.encodeReview(record.aiReview) {
+                existingObj.setValue(incoming, forKey: "aiReview")
+                pc.save()
+                savedRecordCount += 1
+            }
+            return
+        }
 
         let recObj = NSEntityDescription.insertNewObject(
             forEntityName: "GameRecordEntity", into: ctx)
-        recObj.setValue(UUID(),                          forKey: "id")
+        // Use record.id verbatim — the caller (GameViewModel) holds this id
+        // and uses it later to attach an AI review via updateAIReview(recordID:).
+        // Generating a fresh UUID here would silently desync the two.
+        recObj.setValue(record.id,                       forKey: "id")
         recObj.setValue(record.puzzleID,                 forKey: "puzzleID")
         recObj.setValue(record.puzzleTitle,              forKey: "puzzleTitle")
         recObj.setValue(record.startedAt,                forKey: "startedAt")
         recObj.setValue(record.endedAt,                  forKey: "endedAt")
         recObj.setValue(record.isWon,                    forKey: "isWon")
         recObj.setValue(Int32(record.questionCount),     forKey: "questionCount")
+        recObj.setValue(Self.encodeReview(record.aiReview), forKey: "aiReview")
 
         var msgSet = Set<NSManagedObject>()
         for msg in record.messages {
@@ -98,6 +119,51 @@ final class GameRecordStore {
         for record in remote {
             saveRecord(record)   // dedup by puzzleID + startedAt is handled inside saveRecord
         }
+    }
+
+    // MARK: - AI Review
+
+    /// Persist an AI-generated review onto an existing record. Writes through
+    /// to Firestore if signed in. Idempotent — calling twice with the same
+    /// review is a no-op beyond the second write.
+    func updateAIReview(recordID: UUID, review: GameReview) {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
+        req.predicate = NSPredicate(format: "id == %@", recordID as CVarArg)
+        req.fetchLimit = 1
+        guard let recObj = try? pc.ctx.fetch(req).first else { return }
+        recObj.setValue(Self.encodeReview(review), forKey: "aiReview")
+        pc.save()
+        savedRecordCount += 1   // trigger SwiftUI refresh
+
+        if let uid = currentUID {
+            Task { await firestore.updateAIReview(recordID: recordID, review: review, uid: uid) }
+        }
+    }
+
+    /// Read the AI review (if any) from a fetched managed object.
+    static func decodeReview(_ obj: NSManagedObject) -> GameReview? {
+        guard let raw = obj.value(forKey: "aiReview") as? String,
+              let data = raw.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(GameReview.self, from: data)
+    }
+
+    /// Convenience for lookups by record id — used by GameView's answer sheet
+    /// to render an existing review without re-fetching the full record.
+    func review(for recordID: UUID) -> GameReview? {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
+        req.predicate = NSPredicate(format: "id == %@", recordID as CVarArg)
+        req.fetchLimit = 1
+        guard let obj = try? pc.ctx.fetch(req).first else { return nil }
+        return Self.decodeReview(obj)
+    }
+
+    // MARK: - Private helpers
+
+    private static func encodeReview(_ review: GameReview?) -> String? {
+        guard let review,
+              let data = try? JSONEncoder().encode(review),
+              let str = String(data: data, encoding: .utf8) else { return nil }
+        return str
     }
 
     // MARK: - Read / Stats
