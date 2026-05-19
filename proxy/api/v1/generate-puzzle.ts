@@ -307,6 +307,26 @@ async function handleStreaming(apiKey: string, userPrompt: string): Promise<Resp
             for (const event of newlyClosed) {
               controller.enqueue(encoder.encode(sseEvent({ name: "progress", data: event })));
             }
+          } else if (data.type === "message_delta") {
+            // Anthropic surfaces refusals here, well before message_stop.
+            // Distinct from a parse error — the model deliberately stopped.
+            const md = (parsed.data as {
+              delta?: { stop_reason?: string };
+              message?: { stop_details?: { category?: string; explanation?: string } };
+            });
+            if (md.delta?.stop_reason === "refusal") {
+              controller.enqueue(
+                encoder.encode(sseEvent({
+                  name: "refusal",
+                  data: {
+                    category: md.message?.stop_details?.category,
+                    explanation: md.message?.stop_details?.explanation,
+                  },
+                })),
+              );
+              controller.close();
+              return;
+            }
           } else if (data.type === "message_stop") {
             // Final parse: the accumulated buffer should be the complete
             // tool input JSON. If parsing fails we still emit an error

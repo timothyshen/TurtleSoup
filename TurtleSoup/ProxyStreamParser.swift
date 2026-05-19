@@ -22,11 +22,16 @@ enum ProxyStreamEvent: Equatable {
     /// keys (`puzzle`, `review`) using its known schema.
     case complete(payload: [String: Any])
     case error(code: String, message: String)
+    /// Anthropic returned stop_reason: "refusal". Distinct from `.error`
+    /// so callers can render a non-alarming "AI 拒绝处理" UI without
+    /// looking like a transient bug to retry.
+    case refusal(category: String?, explanation: String?)
 
     static func == (lhs: ProxyStreamEvent, rhs: ProxyStreamEvent) -> Bool {
         switch (lhs, rhs) {
         case let (.progress(la, lv), .progress(ra, rv)): return la == ra && lv == rv
         case let (.error(la, lm),    .error(ra, rm)):    return la == ra && lm == rm
+        case let (.refusal(lc, le),  .refusal(rc, re)):  return lc == rc && le == re
         // [String: Any] isn't Equatable; treat as opaque — equality only
         // makes sense via direct field comparison by the caller.
         case (.complete, .complete): return false
@@ -100,6 +105,11 @@ struct ProxyStreamReader {
             let code = (obj["code"] as? String) ?? "stream_error"
             let message = (obj["message"] as? String) ?? "unknown"
             return .error(code: code, message: message)
+        case "refusal":
+            return .refusal(
+                category: obj["category"] as? String,
+                explanation: obj["explanation"] as? String
+            )
         default:
             return nil
         }

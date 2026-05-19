@@ -13,4 +13,8 @@
 export type ServerSentEvent =
   | { name: "progress"; data: { field: string; value: string } }
   | { name: "complete"; data: Record<string, unknown> }
-  | { name: "error";    data: { code: string; message: string } };
+  | { name: "error";    data: { code: string; message: string } }
+  /// Anthropic returned stop_reason: "refusal". Distinct from "error" so
+  /// the client can render a non-alarming "AI 拒绝处理" notice instead
+  /// of treating it as a transient failure to retry.
+  | { name: "refusal";  data: { category?: string; explanation?: string } };

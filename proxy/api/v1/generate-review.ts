@@ -258,6 +258,25 @@ async function handleStreaming(apiKey: string, userPrompt: string): Promise<Resp
             for (const event of newlyClosed) {
               controller.enqueue(encoder.encode(sseEvent({ name: "progress", data: event })));
             }
+          } else if (data.type === "message_delta") {
+            // Refusal short-circuit (see generate-puzzle.ts for the rationale).
+            const md = (parsed.data as {
+              delta?: { stop_reason?: string };
+              message?: { stop_details?: { category?: string; explanation?: string } };
+            });
+            if (md.delta?.stop_reason === "refusal") {
+              controller.enqueue(
+                encoder.encode(sseEvent({
+                  name: "refusal",
+                  data: {
+                    category: md.message?.stop_details?.category,
+                    explanation: md.message?.stop_details?.explanation,
+                  },
+                })),
+              );
+              controller.close();
+              return;
+            }
           } else if (data.type === "message_stop") {
             try {
               const review = JSON.parse(detector.full()) as Record<string, unknown>;

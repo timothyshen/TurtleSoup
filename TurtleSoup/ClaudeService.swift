@@ -254,7 +254,10 @@ actor ClaudeService {
         ]
 
         let request = try await buildRequest(body: body)
-        let (bytes, response) = try await session.bytes(for: request)
+        // One silent retry on transient connection failures — absorbs the
+        // common "wifi blipped just now" case. Mid-stream errors still
+        // surface to the UI's retry button.
+        let (bytes, response) = try await SessionRetry.bytesWithRetry(for: request, session: session)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             // Non-200: collect the error body so the upstream message is

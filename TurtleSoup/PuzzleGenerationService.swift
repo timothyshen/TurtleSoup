@@ -113,7 +113,8 @@ actor PuzzleGenerationService {
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         req.httpBody = bodyData
 
-        let (bytes, response) = try await session.bytes(for: req)
+        // One silent retry on transient connection failures (see SessionRetry).
+        let (bytes, response) = try await SessionRetry.bytesWithRetry(for: req, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw GenerationError.invalidResponse("Not an HTTP response")
         }
@@ -142,6 +143,8 @@ actor PuzzleGenerationService {
                 return
             case .error(let code, let message):
                 throw GenerationError.serverError(0, "{\"error\":{\"code\":\"\(code)\",\"message\":\"\(message)\"}}")
+            case .refusal(let category, let explanation):
+                throw GenerationError.refused(category: category, explanation: explanation)
             }
         }
         // Stream ended without complete — best-effort failure.
@@ -204,6 +207,9 @@ actor PuzzleGenerationService {
     enum GenerationError: LocalizedError {
         case invalidResponse(String)
         case serverError(Int, String)
+        /// Anthropic refused the request (stop_reason: "refusal"). Distinct
+        /// from a server error so UI can render a non-alarming notice.
+        case refused(category: String?, explanation: String?)
 
         var errorDescription: String? {
             switch self {
@@ -213,6 +219,11 @@ actor PuzzleGenerationService {
                     return "服务器错误 (\(code))：\(parsed.error.message)"
                 }
                 return "服务器错误 (\(code))：\(body.prefix(200))"
+            case .refused(_, let explanation):
+                if let explanation, !explanation.isEmpty {
+                    return "AI 拒绝生成：\(explanation)"
+                }
+                return "AI 拒绝生成此题目（可能与输入内容相关）"
             }
         }
     }

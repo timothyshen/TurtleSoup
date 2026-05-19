@@ -207,7 +207,8 @@ actor ReviewService {
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         req.httpBody = bodyData
 
-        let (bytes, response) = try await session.bytes(for: req)
+        // One silent retry on transient connection failures (see SessionRetry).
+        let (bytes, response) = try await SessionRetry.bytesWithRetry(for: req, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw ReviewError.invalidResponse("Not an HTTP response")
         }
@@ -236,6 +237,8 @@ actor ReviewService {
                 return
             case .error(let code, let message):
                 throw ReviewError.serverError(0, "{\"error\":{\"code\":\"\(code)\",\"message\":\"\(message)\"}}")
+            case .refusal(let category, let explanation):
+                throw ReviewError.refused(category: category, explanation: explanation)
             }
         }
         throw ReviewError.invalidResponse("Stream ended without complete event")
@@ -252,6 +255,7 @@ actor ReviewService {
     enum ReviewError: LocalizedError {
         case invalidResponse(String)
         case serverError(Int, String)
+        case refused(category: String?, explanation: String?)
 
         var errorDescription: String? {
             switch self {
@@ -261,6 +265,11 @@ actor ReviewService {
                     return "服务器错误 (\(code))：\(parsed.error.message)"
                 }
                 return "服务器错误 (\(code))：\(body.prefix(200))"
+            case .refused(_, let explanation):
+                if let explanation, !explanation.isEmpty {
+                    return "AI 拒绝复盘：\(explanation)"
+                }
+                return "AI 拒绝复盘此对局"
             }
         }
     }
