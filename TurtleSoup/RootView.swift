@@ -38,7 +38,8 @@ struct RootView: View {
                         puzzle: puzzle,
                         transport: makeTransport(),
                         recordStore: recordStore,
-                        reviewConfig: makeReviewConfig()
+                        reviewConfig: makeReviewConfig(),
+                        isPublicPuzzle: sidebarTab == .square
                     )
                     .id(puzzle.id)
                 } else {

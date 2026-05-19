@@ -10,4 +10,5 @@ protocol FirestoreServicing {
     func fetchUserPuzzles(uid: String) async -> [Puzzle]
     func publishPuzzle(_ puzzle: Puzzle, uid: String) async
     func fetchPublicPuzzles(limit: Int) async -> [Puzzle]
+    func incrementPublicPlayCount(puzzleID: UUID) async
 }

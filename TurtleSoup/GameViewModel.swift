@@ -25,6 +25,9 @@ final class GameViewModel {
     private let recordStore: GameRecordStore
     private let startedAt: Date = Date()
     private let claude: ClaudeService
+    /// True when this puzzle was selected from the public square. Drives the
+    /// publicPuzzles/{id}.playCount writeback on game end.
+    private let isPublicPuzzle: Bool
     /// Set after the first persistRecord call so generateReview knows which
     /// CoreData row to attach the review to.
     private var lastSavedRecordID: UUID? = nil
@@ -32,21 +35,23 @@ final class GameViewModel {
     /// Designated init. Tests use this with a `ClaudeService` constructed
     /// against a mocked URLSession; production code uses the Transport
     /// convenience init below.
-    init(puzzle: Puzzle, claude: ClaudeService, recordStore: GameRecordStore) {
+    init(puzzle: Puzzle, claude: ClaudeService, recordStore: GameRecordStore, isPublicPuzzle: Bool = false) {
         self.recordStore = recordStore
         self.puzzle = puzzle
         self.claude = claude
+        self.isPublicPuzzle = isPublicPuzzle
         self.messages = [
             Message(role: .system,
                     text: "游戏开始——你可以用陈述或问句来探索真相，主持人只回答：是 / 否 / 无关 / 部分正确")
         ]
     }
 
-    convenience init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
+    convenience init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore, isPublicPuzzle: Bool = false) {
         self.init(
             puzzle: puzzle,
             claude: ClaudeService(transport: transport),
-            recordStore: recordStore
+            recordStore: recordStore,
+            isPublicPuzzle: isPublicPuzzle
         )
     }
 
@@ -104,6 +109,12 @@ final class GameViewModel {
         )
         lastSavedRecordID = record.id
         recordStore.saveRecord(record)
+
+        // For public-square puzzles, bump the global play counter. Counts both
+        // wins and give-ups (mirrors local playCount semantics).
+        if isPublicPuzzle {
+            recordStore.incrementPublicPlayCount(puzzleID: puzzle.id)
+        }
     }
 
     // MARK: - AI review

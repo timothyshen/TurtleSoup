@@ -9,6 +9,7 @@ final class GameViewModelTests: XCTestCase {
 
     private var session: URLSession!
     private var recordStore: GameRecordStore!
+    private var firestoreMock: MockFirestoreService!
 
     override func setUp() {
         super.setUp()
@@ -17,7 +18,8 @@ final class GameViewModelTests: XCTestCase {
         session = URLSession(configuration: cfg)
         MockURLProtocol.reset()
 
-        recordStore = GameRecordStore(pc: .test, firestore: MockFirestoreService())
+        firestoreMock = MockFirestoreService()
+        recordStore = GameRecordStore(pc: .test, firestore: firestoreMock)
         clearRecords()
     }
 
@@ -26,7 +28,44 @@ final class GameViewModelTests: XCTestCase {
         MockURLProtocol.reset()
         session = nil
         recordStore = nil
+        firestoreMock = nil
         super.tearDown()
+    }
+
+    // MARK: - Public playCount writeback
+
+    func testWinOnPublicPuzzleIncrementsRemotePlayCount() async throws {
+        let puzzleID = UUID()
+        MockURLProtocol.requestHandler = { _ in
+            (200, [:], anthropicSuccessBody(verdict: "win", comment: "对了"))
+        }
+        let vm = makeVM(puzzle: makePuzzle(id: puzzleID), isPublic: true)
+        vm.inputText = "他认识凶手吗？"
+        vm.send()
+        try await waitForLoadingToClear(vm)
+        // Increment is fire-and-forget Task — give it a tick.
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(firestoreMock.publicPlayCountIncrements, [puzzleID])
+    }
+
+    func testGiveUpOnPublicPuzzleIncrementsRemotePlayCount() async throws {
+        let puzzleID = UUID()
+        let vm = makeVM(puzzle: makePuzzle(id: puzzleID), isPublic: true)
+        vm.giveUp()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(firestoreMock.publicPlayCountIncrements, [puzzleID],
+                       "give-up should also count toward public playCount")
+    }
+
+    func testNonPublicPuzzleSkipsRemoteIncrement() async throws {
+        let vm = makeVM(isPublic: false)
+        vm.giveUp()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(firestoreMock.publicPlayCountIncrements.isEmpty,
+                      "private/built-in puzzles must not touch publicPuzzles")
     }
 
     // MARK: - send() optimistic updates
@@ -171,10 +210,10 @@ final class GameViewModelTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeVM(puzzle: Puzzle? = nil) -> GameViewModel {
+    private func makeVM(puzzle: Puzzle? = nil, isPublic: Bool = false) -> GameViewModel {
         let p = puzzle ?? makePuzzle()
         let claude = ClaudeService(transport: .direct(apiKey: "test-key"), session: session)
-        return GameViewModel(puzzle: p, claude: claude, recordStore: recordStore)
+        return GameViewModel(puzzle: p, claude: claude, recordStore: recordStore, isPublicPuzzle: isPublic)
     }
 
     private func makePuzzle(id: UUID = UUID()) -> Puzzle {

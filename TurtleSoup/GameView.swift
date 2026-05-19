@@ -11,8 +11,8 @@ struct GameView: View {
 
     @FocusState private var inputFocused: Bool
 
-    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore, reviewConfig: ReviewService.Config? = nil) {
-        _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, transport: transport, recordStore: recordStore))
+    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore, reviewConfig: ReviewService.Config? = nil, isPublicPuzzle: Bool = false) {
+        _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, transport: transport, recordStore: recordStore, isPublicPuzzle: isPublicPuzzle))
         _recordStore = State(wrappedValue: recordStore)
         self.reviewConfig = reviewConfig
     }

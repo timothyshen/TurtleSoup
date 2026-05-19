@@ -29,6 +29,22 @@ struct SettingsView: View {
                 Text("仅在代理 Endpoint 留空时使用。生产环境建议改用代理。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // Nudge users off the .direct path. Triggers only when they
+                // have a key configured but no proxy — i.e. they could switch
+                // and didn't. Silent when both are empty (new install) or
+                // when proxy is already on.
+                if proxyEndpoint.isEmpty && !apiKey.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("当前走本地 key 直连 Anthropic — 该模式不支持 AI 出题 / AI 复盘，且 key 明文存于 UserDefaults。生产请配置上面的代理 Base URL 并登录。")
+                            .font(.caption)
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
             }
 
             // MARK: Account

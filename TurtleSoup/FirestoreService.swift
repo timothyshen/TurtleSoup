@@ -214,4 +214,20 @@ struct FirestoreService: FirestoreServicing {
             return []
         }
     }
+
+    /// Increment publicPuzzles/{id}.playCount by 1. Uses FieldValue.increment
+    /// so concurrent plays from different devices don't race. Silently no-ops
+    /// if the doc doesn't exist (built-in puzzle ID, or user's own
+    /// unpublished puzzle) — we don't want to materialize a phantom public
+    /// puzzle row, and security rules would reject it anyway.
+    func incrementPublicPlayCount(puzzleID: UUID) async {
+        let ref = publicPuzzlesRef.document(puzzleID.uuidString)
+        do {
+            let snapshot = try await ref.getDocument()
+            guard snapshot.exists else { return }
+            try await ref.updateData(["playCount": FieldValue.increment(Int64(1))])
+        } catch {
+            logger.error("Firestore incrementPublicPlayCount failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
 }

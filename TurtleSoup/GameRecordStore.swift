@@ -110,6 +110,13 @@ final class GameRecordStore {
         }
     }
 
+    /// Increment the public-square playCount for a puzzle. Fire-and-forget;
+    /// no-op if the puzzle isn't in publicPuzzles (handled server-side).
+    /// Called by GameViewModel on win/giveUp when isPublicPuzzle is true.
+    func incrementPublicPlayCount(puzzleID: UUID) {
+        Task { await firestore.incrementPublicPlayCount(puzzleID: puzzleID) }
+    }
+
     // MARK: - Remote Sync
 
     /// Pull game records from Firestore and merge into local CoreData.

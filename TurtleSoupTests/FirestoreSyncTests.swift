@@ -37,6 +37,10 @@ final class MockFirestoreService: FirestoreServicing {
         publishedPuzzles.append(puzzle)
     }
     func fetchPublicPuzzles(limit: Int) async -> [Puzzle] { [] }
+    var publicPlayCountIncrements: [UUID] = []
+    func incrementPublicPlayCount(puzzleID: UUID) async {
+        publicPlayCountIncrements.append(puzzleID)
+    }
 }
 
 // MARK: - GameRecordStore Sync Tests
