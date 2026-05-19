@@ -6,6 +6,7 @@
 #   2. /api/v1/messages rejects unauthenticated requests with 401 + missing_auth
 #   3. /api/v1/messages rejects malformed tokens with 401
 #   4. /api/v1/generate-puzzle rejects unauthenticated requests with 401
+#   5. /api/v1/generate-review rejects unauthenticated requests with 401
 #
 # Does NOT exercise the happy path of the protected endpoints — that requires
 # a real Firebase ID Token. The point of smoke is to confirm the proxy is
@@ -66,7 +67,7 @@ parse_body()   { echo "$1" | awk -F$'\x1f' 'BEGIN{ORS=""} {for(i=1;i<NF;i++){pri
 printf "→ smoke testing %s\n\n" "$BASE_URL"
 
 # ─── 1. health ───────────────────────────────────────────────────────────────
-printf "${DIM}[1/4] GET /api/health${RESET}\n"
+printf "${DIM}[1/5] GET /api/health${RESET}\n"
 out=$(http GET "/api/health")
 status=$(parse_status "$out")
 body=$(parse_body "$out")
@@ -77,7 +78,7 @@ else
 fi
 
 # ─── 2. messages, no auth ────────────────────────────────────────────────────
-printf "${DIM}[2/4] POST /api/v1/messages  (no Authorization)${RESET}\n"
+printf "${DIM}[2/5] POST /api/v1/messages  (no Authorization)${RESET}\n"
 out=$(http POST "/api/v1/messages" \
        -H "Content-Type: application/json" \
        -d '{"model":"x","max_tokens":1,"messages":[]}')
@@ -90,7 +91,7 @@ else
 fi
 
 # ─── 3. messages, garbage token ──────────────────────────────────────────────
-printf "${DIM}[3/4] POST /api/v1/messages  (Bearer garbage)${RESET}\n"
+printf "${DIM}[3/5] POST /api/v1/messages  (Bearer garbage)${RESET}\n"
 out=$(http POST "/api/v1/messages" \
        -H "Content-Type: application/json" \
        -H "Authorization: Bearer not-a-real-jwt" \
@@ -106,7 +107,7 @@ else
 fi
 
 # ─── 4. generate-puzzle, no auth ─────────────────────────────────────────────
-printf "${DIM}[4/4] POST /api/v1/generate-puzzle  (no Authorization)${RESET}\n"
+printf "${DIM}[4/5] POST /api/v1/generate-puzzle  (no Authorization)${RESET}\n"
 out=$(http POST "/api/v1/generate-puzzle" \
        -H "Content-Type: application/json" \
        -d '{"idea":"x"}')
@@ -116,6 +117,19 @@ if [[ "$status" == "401" ]] && echo "$body" | grep -q '"code":"missing_auth"'; t
   report "401 + missing_auth" 0 ""
 else
   report "generate-puzzle should reject missing auth" 1 "got status=$status body=$body"
+fi
+
+# ─── 5. generate-review, no auth ─────────────────────────────────────────────
+printf "${DIM}[5/5] POST /api/v1/generate-review  (no Authorization)${RESET}\n"
+out=$(http POST "/api/v1/generate-review" \
+       -H "Content-Type: application/json" \
+       -d '{"puzzle":{"title":"x","scenario":"x","answer":"x"},"transcript":[{"role":"user","text":"x"}],"isWon":false,"questionCount":1}')
+status=$(parse_status "$out")
+body=$(parse_body "$out")
+if [[ "$status" == "401" ]] && echo "$body" | grep -q '"code":"missing_auth"'; then
+  report "401 + missing_auth" 0 ""
+else
+  report "generate-review should reject missing auth" 1 "got status=$status body=$body"
 fi
 
 # ─── summary ─────────────────────────────────────────────────────────────────
