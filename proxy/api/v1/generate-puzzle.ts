@@ -12,6 +12,7 @@ import { withCORS, preflight } from "../../lib/cors.js";
 import { jsonError } from "../../lib/errors.js";
 import { requireAuth } from "../../lib/auth-middleware.js";
 import { FieldDetector, sseEvent, parseSSEBlock, sseBlocks } from "../../lib/tool-stream.js";
+import { logError } from "../../lib/telemetry.js";
 
 export const config = { runtime: "edge" };
 
@@ -159,7 +160,7 @@ export default async function handler(req: Request): Promise<Response> {
   const userPrompt = buildUserPrompt(payload);
 
   if (payload.stream) {
-    return handleStreaming(apiKey, userPrompt);
+    return handleStreaming(apiKey, userPrompt, auth.token.uid);
   }
 
   let upstream: Response;
@@ -197,13 +198,9 @@ export default async function handler(req: Request): Promise<Response> {
       }),
     });
   } catch (e) {
-    return withCORS(
-      jsonError(
-        502,
-        "upstream_unreachable",
-        `Failed to reach Anthropic: ${(e as Error).message}`,
-      ),
-    );
+    const msg = (e as Error).message;
+    logError({ endpoint: "generate-puzzle", uid: auth.token.uid, code: "upstream_unreachable", message: msg });
+    return withCORS(jsonError(502, "upstream_unreachable", `Failed to reach Anthropic: ${msg}`));
   }
 
   if (!upstream.ok) {
@@ -244,7 +241,7 @@ export default async function handler(req: Request): Promise<Response> {
  * event rather than throwing — the client is already mid-iteration and
  * can't see a different HTTP status.
  */
-async function handleStreaming(apiKey: string, userPrompt: string): Promise<Response> {
+async function handleStreaming(apiKey: string, userPrompt: string, uid: string): Promise<Response> {
   let upstream: Response;
   try {
     upstream = await fetch(ANTHROPIC_URL, {
@@ -269,9 +266,9 @@ async function handleStreaming(apiKey: string, userPrompt: string): Promise<Resp
       }),
     });
   } catch (e) {
-    return withCORS(
-      jsonError(502, "upstream_unreachable", `Failed to reach Anthropic: ${(e as Error).message}`),
-    );
+    const msg = (e as Error).message;
+    logError({ endpoint: "generate-puzzle", uid, code: "upstream_unreachable", message: msg, extra: { mode: "stream" } });
+    return withCORS(jsonError(502, "upstream_unreachable", `Failed to reach Anthropic: ${msg}`));
   }
 
   if (!upstream.ok || !upstream.body) {

@@ -12,6 +12,7 @@
 import { withCORS, preflight } from "../../lib/cors.js";
 import { jsonError } from "../../lib/errors.js";
 import { requireAuth } from "../../lib/auth-middleware.js";
+import { logError } from "../../lib/telemetry.js";
 
 export const config = { runtime: "edge" };
 
@@ -51,13 +52,9 @@ export default async function handler(req: Request): Promise<Response> {
       body,
     });
   } catch (e) {
-    return withCORS(
-      jsonError(
-        502,
-        "upstream_unreachable",
-        `Failed to reach Anthropic: ${(e as Error).message}`,
-      ),
-    );
+    const msg = (e as Error).message;
+    logError({ endpoint: "messages", uid: auth.token.uid, code: "upstream_unreachable", message: msg });
+    return withCORS(jsonError(502, "upstream_unreachable", `Failed to reach Anthropic: ${msg}`));
   }
 
   // Pass status + body through unchanged. Strip hop-by-hop headers; keep
