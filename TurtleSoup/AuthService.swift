@@ -39,6 +39,14 @@ final class AuthService: NSObject {
         user = nil
     }
 
+    /// Fetch a fresh Firebase ID Token for the currently signed-in user.
+    /// Used by `ClaudeService.Transport.proxy` to authenticate proxy requests.
+    /// Throws `AuthError.notSignedIn` if no user is signed in.
+    func getIDToken() async throws -> String {
+        guard let user else { throw AuthError.notSignedIn }
+        return try await user.getIDToken()
+    }
+
     // MARK: - Apple Sign In
 
     func startAppleSignIn() -> ASAuthorizationAppleIDRequest {
@@ -97,6 +105,12 @@ final class AuthService: NSObject {
 
     enum AuthError: LocalizedError {
         case invalidCredential
-        var errorDescription: String? { "无效的 Apple 登录凭证" }
+        case notSignedIn
+        var errorDescription: String? {
+            switch self {
+            case .invalidCredential: return "无效的 Apple 登录凭证"
+            case .notSignedIn:       return "未登录"
+            }
+        }
     }
 }

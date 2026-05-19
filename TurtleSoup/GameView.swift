@@ -7,8 +7,8 @@ struct GameView: View {
 
     @FocusState private var inputFocused: Bool
 
-    init(puzzle: Puzzle, apiKey: String, recordStore: GameRecordStore) {
-        _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, apiKey: apiKey, recordStore: recordStore))
+    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
+        _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, transport: transport, recordStore: recordStore))
         _recordStore = State(wrappedValue: recordStore)
     }
 

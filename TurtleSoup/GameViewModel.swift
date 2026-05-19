@@ -19,10 +19,10 @@ final class GameViewModel {
     private let startedAt: Date = Date()
     private let claude: ClaudeService
 
-    init(puzzle: Puzzle, apiKey: String, recordStore: GameRecordStore) {
+    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
         self.recordStore = recordStore
         self.puzzle = puzzle
-        self.claude = ClaudeService(apiKey: apiKey)
+        self.claude = ClaudeService(transport: transport)
         self.messages = [
             Message(role: .system,
                     text: "游戏开始——你可以用陈述或问句来探索真相，主持人只回答：是 / 否 / 无关 / 部分正确")

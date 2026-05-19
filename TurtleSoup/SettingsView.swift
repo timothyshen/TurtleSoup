@@ -4,6 +4,7 @@ import AuthenticationServices
 struct SettingsView: View {
 
     @AppStorage("claude_api_key") private var apiKey = ""
+    @AppStorage("proxy_endpoint") private var proxyEndpoint = ""
     @State var authService: AuthService
 
     @State private var email = ""
@@ -16,9 +17,16 @@ struct SettingsView: View {
         Form {
             // MARK: Claude API
             Section("Claude API") {
-                SecureField("API Key", text: $apiKey)
+                TextField("代理 Endpoint", text: $proxyEndpoint, prompt: Text("https://...vercel.app/api/v1/messages"))
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                Text("填写后所有请求走云端代理，需要登录；留空则走下方本地 API Key。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                SecureField("本地 API Key", text: $apiKey)
                     .textContentType(.password)
-                Text("用于本地直连 Claude API（未登录时生效）")
+                Text("仅在代理 Endpoint 留空时使用。生产环境建议改用代理。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

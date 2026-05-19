@@ -2,12 +2,29 @@ import Foundation
 
 actor ClaudeService {
 
-    // ⚠️  生产环境应从 Keychain 或后端获取，不要硬编码
-    private let apiKey: String
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    /// How the service reaches Claude.
+    ///
+    /// - `.direct`: hit Anthropic directly with the user's local API key.
+    ///   Used for offline dev and as a fallback when no proxy is configured.
+    ///   ⚠️ Ships the API key from the device — only safe for personal use.
+    /// - `.proxy`: hit the haiguitang Vercel proxy, which injects the
+    ///   Anthropic key server-side and gates requests with a Firebase ID Token.
+    enum Transport {
+        case direct(apiKey: String)
+        case proxy(endpoint: URL, idTokenProvider: @Sendable () async throws -> String)
+    }
 
+    private let transport: Transport
+    private static let anthropicDirectURL =
+        URL(string: "https://api.anthropic.com/v1/messages")!
+
+    init(transport: Transport) {
+        self.transport = transport
+    }
+
+    /// Backwards-compatible convenience for callers that still pass a raw API key.
     init(apiKey: String) {
-        self.apiKey = apiKey
+        self.transport = .direct(apiKey: apiKey)
     }
 
     // MARK: - System prompt builder
@@ -63,13 +80,7 @@ actor ClaudeService {
             "messages": messages
         ]
 
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
+        let request = try await buildRequest(body: body)
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -78,6 +89,33 @@ actor ClaudeService {
         }
 
         return try parseResponse(data: data)
+    }
+
+    // MARK: - Request building
+
+    private func buildRequest(body: [String: Any]) async throws -> URLRequest {
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        switch transport {
+        case .direct(let apiKey):
+            var req = URLRequest(url: Self.anthropicDirectURL)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(apiKey,             forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01",       forHTTPHeaderField: "anthropic-version")
+            req.httpBody = bodyData
+            return req
+
+        case .proxy(let endpoint, let tokenProvider):
+            let token = try await tokenProvider()
+            var req = URLRequest(url: endpoint)
+            req.httpMethod = "POST"
+            req.setValue("application/json",       forHTTPHeaderField: "Content-Type")
+            req.setValue("Bearer \(token)",        forHTTPHeaderField: "Authorization")
+            // anthropic-version not needed: the proxy sets it server-side.
+            req.httpBody = bodyData
+            return req
+        }
     }
 
     // MARK: - Parsing
@@ -115,10 +153,14 @@ actor ClaudeService {
     enum ClaudeError: LocalizedError {
         case apiError(String)
         case emptyResponse
+        case notSignedIn
+        case proxyMisconfigured(String)
         var errorDescription: String? {
             switch self {
-            case .apiError(let s): return "API 错误：\(s)"
-            case .emptyResponse:   return "响应为空"
+            case .apiError(let s):              return "API 错误：\(s)"
+            case .emptyResponse:                return "响应为空"
+            case .notSignedIn:                  return "未登录，无法使用云端代理"
+            case .proxyMisconfigured(let msg):  return "代理配置错误：\(msg)"
             }
         }
     }

@@ -5,6 +5,7 @@ enum SidebarTab { case library, create, square }
 struct RootView: View {
 
     @AppStorage("claude_api_key") private var apiKey = ""
+    @AppStorage("proxy_endpoint") private var proxyEndpoint = ""
     @Environment(AuthService.self) private var authService
     @State private var selectedPuzzle: Puzzle? = nil
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -33,7 +34,7 @@ struct RootView: View {
             switch sidebarTab {
             case .library, .square:
                 if let puzzle = selectedPuzzle {
-                    GameView(puzzle: puzzle, apiKey: apiKey, recordStore: recordStore)
+                    GameView(puzzle: puzzle, transport: makeTransport(), recordStore: recordStore)
                         .id(puzzle.id)
                 } else {
                     EmptyDetailView()
@@ -60,5 +61,21 @@ struct RootView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+    }
+
+    /// Build a Claude transport based on current settings:
+    /// - If `proxy_endpoint` is set, route through the haiguitang Vercel proxy
+    ///   and authenticate with a fresh Firebase ID Token.
+    /// - Otherwise, fall back to direct Anthropic calls with the local API key.
+    private func makeTransport() -> ClaudeService.Transport {
+        if !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) {
+            // Capture authService weakly via reference; closure hops to MainActor
+            // on `await` since getIDToken is @MainActor-isolated.
+            return .proxy(endpoint: url) { [authService] in
+                try await authService.getIDToken()
+            }
+        } else {
+            return .direct(apiKey: apiKey)
+        }
     }
 }
