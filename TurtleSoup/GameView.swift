@@ -390,8 +390,9 @@ struct GameView: View {
     }
 
     /// Progress checklist shown while a review is streaming in. summary and
-    /// tip are the only fields the proxy emits progress for (key_moments[]
-    /// arrives all at once in the complete event).
+    /// tip are the only fields the proxy emits progress for; key_moments[]
+    /// arrives in the complete event (its row carries a pendingNote that
+    /// explains the wait). Layout lives in StreamingChecklist.swift.
     private var reviewProgressPane: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
@@ -400,41 +401,10 @@ struct GameView: View {
                     .foregroundStyle(.secondary)
                     .font(.callout)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                reviewProgressRow(label: "总评", key: "summary")
-                reviewProgressRow(label: "关键时刻", key: "key_moments", trailingNote: "随完整结果一起返回")
-                reviewProgressRow(label: "下次建议", key: "tip")
-            }
-            .padding(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            StreamingChecklist(
+                rows: ChecklistSchemas.review,
+                streamedFields: vm.reviewProgress
             )
-        }
-    }
-
-    private func reviewProgressRow(label: String, key: String, trailingNote: String? = nil) -> some View {
-        let value = vm.reviewProgress.first(where: { $0.field == key })?.value
-        let done = value != nil
-        return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle.dotted")
-                .foregroundStyle(done ? Color.green : Color.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(done ? .primary : .secondary)
-                if let v = value {
-                    Text(v)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                } else if let note = trailingNote {
-                    Text(note)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
         }
     }
 

@@ -131,9 +131,9 @@ struct AIPuzzleGeneratorSheet: View {
         .padding(.vertical, 8)
     }
 
-    /// Live progress pane shown while the stream is filling fields. Each
-    /// row is a known top-level puzzle field; pending rows render as a
-    /// dim placeholder until the proxy reports its value.
+    /// Live progress pane shown while the stream is filling fields.
+    /// Schema + row rendering live in StreamingChecklist so the layout
+    /// can be previewed in isolation and reused by the review section.
     private var progressPane: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
@@ -143,61 +143,15 @@ struct AIPuzzleGeneratorSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(orderedFields, id: \.key) { row in
-                    progressRow(label: row.label, value: streamedValue(forKey: row.key))
-                }
-            }
-            .padding(14)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            StreamingChecklist(
+                rows: ChecklistSchemas.puzzle,
+                streamedFields: streamedFields
             )
 
             if let err = errorMessage {
                 Text(err)
                     .font(.caption)
                     .foregroundStyle(.red)
-            }
-        }
-    }
-
-    /// Render order in the progress checklist. Mirrors the order Claude
-    /// tends to fill fields in (and the eventual editor layout).
-    private var orderedFields: [(key: String, label: String)] {
-        [
-            ("title",      "标题"),
-            ("difficulty", "难度"),
-            ("scenario",   "汤面"),
-            ("answer",     "汤底"),
-            ("hint",       "提示"),
-        ]
-    }
-
-    private func streamedValue(forKey key: String) -> String? {
-        streamedFields.first(where: { $0.field == key })?.value
-    }
-
-    private func progressRow(label: String, value: String?) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            if value != nil {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                Image(systemName: "circle.dotted")
-                    .foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(value != nil ? .primary : .secondary)
-                if let v = value {
-                    Text(v)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                }
             }
         }
     }

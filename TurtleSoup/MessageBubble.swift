@@ -153,3 +153,46 @@ struct TypingIndicator: View {
         }
     }
 }
+
+// MARK: - Previews
+
+#Preview("TypingIndicator") {
+    TypingIndicator()
+        .padding()
+        .frame(width: 360)
+}
+
+/// Catalog of message variants: user, all 5 verdicts on assistant rows,
+/// and a system bootstrap line. Lets us eyeball badge colors and bubble
+/// alignment without playing a real game.
+#Preview("MessageBubble — all variants") {
+    VStack(spacing: 4) {
+        MessageBubble(message: Message(role: .system,
+                                       text: "游戏开始——你可以用陈述或问句来探索真相"))
+        MessageBubble(message: Message(role: .user, text: "他认识凶手吗？"))
+        MessageBubble(message: Message(role: .assistant, text: "是", verdict: .yes))
+        MessageBubble(message: Message(role: .user, text: "他还活着吗？"))
+        MessageBubble(message: Message(role: .assistant, text: "否", verdict: .no))
+        MessageBubble(message: Message(role: .user, text: "今天天气好吗？"))
+        MessageBubble(message: Message(role: .assistant, text: "无关", verdict: .irr))
+        MessageBubble(message: Message(role: .user, text: "他是为了纪念某个人？"))
+        MessageBubble(message: Message(role: .assistant, text: "方向对了", verdict: .part))
+        MessageBubble(message: Message(role: .user,
+                                       text: "他每天延后是因为亡妻"))
+        MessageBubble(message: Message(role: .assistant, text: "完全猜中", verdict: .win))
+    }
+    .padding()
+    .frame(width: 480)
+}
+
+/// "Mid-stream" assistant bubble: verdict has arrived (badge renders)
+/// but comment text hasn't filled in yet. Mirrors what GameViewModel
+/// produces between .verdictReady and .complete events.
+#Preview("MessageBubble — verdict-only placeholder") {
+    VStack(spacing: 4) {
+        MessageBubble(message: Message(role: .user, text: "他在等谁？"))
+        MessageBubble(message: Message(role: .assistant, text: "", verdict: .yes))
+    }
+    .padding()
+    .frame(width: 480)
+}
