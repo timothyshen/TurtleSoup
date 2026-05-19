@@ -29,14 +29,25 @@ final class GameViewModel {
     /// CoreData row to attach the review to.
     private var lastSavedRecordID: UUID? = nil
 
-    init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
+    /// Designated init. Tests use this with a `ClaudeService` constructed
+    /// against a mocked URLSession; production code uses the Transport
+    /// convenience init below.
+    init(puzzle: Puzzle, claude: ClaudeService, recordStore: GameRecordStore) {
         self.recordStore = recordStore
         self.puzzle = puzzle
-        self.claude = ClaudeService(transport: transport)
+        self.claude = claude
         self.messages = [
             Message(role: .system,
                     text: "游戏开始——你可以用陈述或问句来探索真相，主持人只回答：是 / 否 / 无关 / 部分正确")
         ]
+    }
+
+    convenience init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore) {
+        self.init(
+            puzzle: puzzle,
+            claude: ClaudeService(transport: transport),
+            recordStore: recordStore
+        )
     }
 
     func send() {
