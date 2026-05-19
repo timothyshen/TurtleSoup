@@ -96,6 +96,153 @@ private struct HistoryRow: View {
     }()
 }
 
+// MARK: - Overview (shown in detail pane when no record is selected)
+
+/// Aggregate stats across all recorded games. Lives in the detail pane
+/// when no specific record is selected so the user gets a snapshot the
+/// moment they switch to the history tab. Recomputes lazily from
+/// `recordStore.allRecords()` keyed on `savedRecordCount`.
+struct HistoryOverviewView: View {
+
+    @Bindable var recordStore: GameRecordStore
+    @State private var records: [GameRecord] = []
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Label("全局统计", systemImage: "chart.bar.xaxis")
+                    .font(.title2.weight(.semibold))
+
+                if records.isEmpty {
+                    Text("还没有记录的对局。先玩一局看看吧。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    statsGrid
+                    recentWinsRow
+                }
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle("历史")
+        .task(id: recordStore.savedRecordCount) {
+            records = recordStore.allRecords()
+        }
+    }
+
+    // MARK: - Stats grid
+
+    private var statsGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)],
+                  alignment: .leading, spacing: 12) {
+            statCard(label: "总对局",
+                     value: "\(records.count)",
+                     subtitle: "次")
+            statCard(label: "胜率",
+                     value: String(format: "%.0f%%", overallWinRate * 100),
+                     subtitle: "\(wonCount) / \(records.count)",
+                     accent: .teal)
+            statCard(label: "总提问数",
+                     value: "\(totalQuestions)",
+                     subtitle: "次")
+            statCard(label: "平均用时",
+                     value: averageDurationString,
+                     subtitle: "每局")
+            if let fastest = fastestWin {
+                statCard(label: "最快通关",
+                         value: durationString(fastest.endedAt.timeIntervalSince(fastest.startedAt)),
+                         subtitle: fastest.puzzleTitle,
+                         accent: .orange)
+            }
+            if let mostAsked = mostAsked {
+                statCard(label: "提问最多",
+                         value: "\(mostAsked.questionCount) 问",
+                         subtitle: mostAsked.puzzleTitle)
+            }
+        }
+    }
+
+    private func statCard(label: String, value: String, subtitle: String,
+                          accent: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Recent wins strip
+
+    @ViewBuilder
+    private var recentWinsRow: some View {
+        let wins = records.filter { $0.isWon }.prefix(5)
+        if !wins.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("最近五次通关")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(Array(wins)) { record in
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.teal)
+                        Text(record.puzzleTitle)
+                            .font(.callout)
+                        Spacer()
+                        Text("\(record.questionCount) 问 · \(durationString(record.endedAt.timeIntervalSince(record.startedAt)))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    // MARK: - Aggregates
+
+    private var wonCount: Int        { records.filter { $0.isWon }.count }
+    private var overallWinRate: Double {
+        records.isEmpty ? 0 : Double(wonCount) / Double(records.count)
+    }
+    private var totalQuestions: Int  { records.reduce(0) { $0 + $1.questionCount } }
+    private var averageDurationString: String {
+        guard !records.isEmpty else { return "—" }
+        let total = records.reduce(0.0) { $0 + $1.endedAt.timeIntervalSince($1.startedAt) }
+        return durationString(total / Double(records.count))
+    }
+    private var fastestWin: GameRecord? {
+        records.filter { $0.isWon }
+            .min(by: {
+                $0.endedAt.timeIntervalSince($0.startedAt) <
+                $1.endedAt.timeIntervalSince($1.startedAt)
+            })
+    }
+    private var mostAsked: GameRecord? {
+        records.max(by: { $0.questionCount < $1.questionCount })
+    }
+
+    private func durationString(_ seconds: TimeInterval) -> String {
+        let secs = Int(seconds)
+        let m = secs / 60, s = secs % 60
+        return m > 0 ? "\(m)分\(s)秒" : "\(s)秒"
+    }
+}
+
 // MARK: - Detail
 
 /// Full read-only render of a past game. The transcript is read from the
@@ -280,6 +427,11 @@ struct HistoryDetailView: View {
         )
     ))
     .frame(width: 640, height: 600)
+}
+
+#Preview("HistoryOverview — empty store") {
+    HistoryOverviewView(recordStore: GameRecordStore(pc: .test))
+        .frame(width: 640, height: 500)
 }
 
 #Preview("HistoryDetail — give-up no review") {

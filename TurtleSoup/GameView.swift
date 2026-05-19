@@ -329,17 +329,42 @@ struct GameView: View {
                 reviewProgressPane
             } else {
                 if let err = vm.reviewError {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                    // Error state. The same "生成 AI 复盘" button can be
+                    // tapped again to retry, but rebranding it as "重试"
+                    // makes the affordance obvious and grouped with the
+                    // error message instead of looking like an unrelated
+                    // green-field action.
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text(err)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Button {
+                            guard let cfg = reviewConfig else { return }
+                            vm.reviewError = nil
+                            vm.startReviewGeneration(config: cfg)
+                        } label: {
+                            Label("重试", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(10)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                } else {
+                    Button {
+                        guard let cfg = reviewConfig else { return }
+                        vm.startReviewGeneration(config: cfg)
+                    } label: {
+                        Label("生成 AI 复盘", systemImage: "wand.and.stars")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                Button {
-                    guard let cfg = reviewConfig else { return }
-                    vm.startReviewGeneration(config: cfg)
-                } label: {
-                    Label("生成 AI 复盘", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.bordered)
             }
         }
     }

@@ -96,9 +96,31 @@ struct AIPuzzleGeneratorSheet: View {
             }
 
             if let err = errorMessage {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                // Error state. Show the message + a retry button so the user
+                // doesn't have to figure out that the "生成" footer button
+                // also retries (it does, but discoverability is poor when
+                // the failure is the only thing on screen).
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button {
+                        startStream()
+                    } label: {
+                        Label("重试", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(config == nil || idea.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(10)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
     }

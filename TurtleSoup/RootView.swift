@@ -61,7 +61,7 @@ struct RootView: View {
                 if let record = selectedHistoryRecord {
                     HistoryDetailView(record: record).id(record.id)
                 } else {
-                    EmptyDetailView()
+                    HistoryOverviewView(recordStore: recordStore)
                 }
             }
         }
