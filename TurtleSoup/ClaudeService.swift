@@ -82,10 +82,16 @@ actor ClaudeService {
                     "content": $0.role == .assistant ? buildAssistantContent($0) : $0.text] }
         messages.append(["role": "user", "content": userInput])
 
+        // Model: Sonnet 4.6.
+        // - effort=low + thinking disabled: gameplay turns are short JSON verdicts;
+        //   skill doc notes this matches/beats Sonnet 4.5 (no-thinking) on chat workloads.
+        // - Sonnet 4.6 defaults to effort=high — must set explicitly or latency/cost balloon.
         let body: [String: Any] = [
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 150,
             "system": systemPrompt(for: puzzle),
+            "thinking": ["type": "disabled"],
+            "output_config": ["effort": "low"],
             "messages": messages
         ]
 

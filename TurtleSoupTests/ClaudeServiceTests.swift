@@ -89,7 +89,9 @@ final class ClaudeServiceTests: XCTestCase {
         let body = try XCTUnwrap(MockURLProtocol.lastRequest?.bodyData)
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
 
-        XCTAssertEqual(obj["model"] as? String, "claude-sonnet-4-20250514")
+        XCTAssertEqual(obj["model"] as? String, "claude-sonnet-4-6")
+        XCTAssertEqual(obj["output_config"] as? [String: String], ["effort": "low"])
+        XCTAssertEqual(obj["thinking"] as? [String: String], ["type": "disabled"])
         let systemPrompt = try XCTUnwrap(obj["system"] as? String)
         XCTAssertTrue(systemPrompt.contains(samplePuzzle().answer),
                       "system prompt should embed the answer (汤底) server-side equivalent path")

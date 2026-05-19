@@ -16,7 +16,7 @@ export const config = { runtime: "edge" };
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 
 type Difficulty = "简单" | "中等" | "困难";
 
@@ -125,6 +125,11 @@ export default async function handler(req: Request): Promise<Response> {
         model: MODEL,
         max_tokens: 1500,
         system: SYSTEM_PROMPT,
+        // Sonnet 4.6: must set effort explicitly (defaults to "high").
+        // medium balances quality vs cost for creative tool_use generation.
+        // thinking disabled — adaptive would add ~2-5s without measurable quality lift here.
+        thinking: { type: "disabled" },
+        output_config: { effort: "medium" },
         tools: [SUBMIT_TOOL],
         tool_choice: { type: "tool", name: "submit_puzzle" },
         messages: [{ role: "user", content: userPrompt }],
