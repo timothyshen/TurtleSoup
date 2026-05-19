@@ -17,10 +17,10 @@ struct SettingsView: View {
         Form {
             // MARK: Claude API
             Section("Claude API") {
-                TextField("代理 Endpoint", text: $proxyEndpoint, prompt: Text("https://...vercel.app/api/v1/messages"))
+                TextField("代理 Base URL", text: $proxyEndpoint, prompt: Text("https://xxx.vercel.app"))
                     .textContentType(.URL)
                     .autocorrectionDisabled()
-                Text("填写后所有请求走云端代理，需要登录；留空则走下方本地 API Key。")
+                Text("Vercel 部署根路径（不要带 /api/...）。填写后所有请求走云端代理，需要登录；留空则走下方本地 API Key。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

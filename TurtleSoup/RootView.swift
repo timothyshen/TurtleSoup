@@ -44,7 +44,8 @@ struct RootView: View {
                     editingPuzzle: $editingPuzzle,
                     store: store,
                     authService: authService,
-                    publicStore: publicStore
+                    publicStore: publicStore,
+                    generatorConfig: makeGeneratorConfig()
                 )
                 .id(editingPuzzle?.id.uuidString ?? newPuzzleToken.uuidString)
             }
@@ -71,11 +72,23 @@ struct RootView: View {
         if !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) {
             // Capture authService weakly via reference; closure hops to MainActor
             // on `await` since getIDToken is @MainActor-isolated.
-            return .proxy(endpoint: url) { [authService] in
+            return .proxy(baseURL: url) { [authService] in
                 try await authService.getIDToken()
             }
         } else {
             return .direct(apiKey: apiKey)
+        }
+    }
+
+    /// Build a generator config from the same proxy settings. Returns nil if
+    /// no proxy is configured — AI puzzle generation requires the proxy
+    /// (we don't want to expose tool_use orchestration via direct key paths).
+    private func makeGeneratorConfig() -> PuzzleGenerationService.Config? {
+        guard !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) else {
+            return nil
+        }
+        return PuzzleGenerationService.Config(baseURL: url) { [authService] in
+            try await authService.getIDToken()
         }
     }
 }

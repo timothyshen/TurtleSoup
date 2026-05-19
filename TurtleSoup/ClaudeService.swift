@@ -7,11 +7,13 @@ actor ClaudeService {
     /// - `.direct`: hit Anthropic directly with the user's local API key.
     ///   Used for offline dev and as a fallback when no proxy is configured.
     ///   ⚠️ Ships the API key from the device — only safe for personal use.
-    /// - `.proxy`: hit the haiguitang Vercel proxy, which injects the
-    ///   Anthropic key server-side and gates requests with a Firebase ID Token.
+    /// - `.proxy`: hit the haiguitang Vercel proxy at `baseURL/api/v1/messages`,
+    ///   which injects the Anthropic key server-side and gates requests with
+    ///   a Firebase ID Token. `baseURL` is the deployment root, e.g.
+    ///   `https://haiguitang.vercel.app`.
     enum Transport {
         case direct(apiKey: String)
-        case proxy(endpoint: URL, idTokenProvider: @Sendable () async throws -> String)
+        case proxy(baseURL: URL, idTokenProvider: @Sendable () async throws -> String)
     }
 
     private let transport: Transport
@@ -106,8 +108,9 @@ actor ClaudeService {
             req.httpBody = bodyData
             return req
 
-        case .proxy(let endpoint, let tokenProvider):
+        case .proxy(let baseURL, let tokenProvider):
             let token = try await tokenProvider()
+            let endpoint = baseURL.appendingPathComponent("api/v1/messages")
             var req = URLRequest(url: endpoint)
             req.httpMethod = "POST"
             req.setValue("application/json",       forHTTPHeaderField: "Content-Type")

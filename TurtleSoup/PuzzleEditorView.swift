@@ -6,6 +6,8 @@ struct PuzzleEditorView: View {
     @Bindable var store: PuzzleStore
     var authService: AuthService?
     var publicStore: PublicPuzzleStore?
+    /// Optional. nil disables the AI 生成 button.
+    var generatorConfig: PuzzleGenerationService.Config?
 
     // Form state
     @State private var title: String = ""
@@ -28,11 +30,28 @@ struct PuzzleEditorView: View {
     // Delete confirmation
     @State private var showDeleteAlert = false
 
+    // AI generator sheet
+    @State private var showAISheet = false
+
     var isEditMode: Bool { originalPuzzle != nil }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // AI 生成入口（仅在 generatorConfig 可用时显示）
+                if generatorConfig != nil {
+                    HStack {
+                        Spacer()
+                        Button {
+                            showAISheet = true
+                        } label: {
+                            Label("AI 生成草稿", systemImage: "sparkles")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    }
+                }
+
                 // 标题
                 fieldSection(label: "题目标题", required: true) {
                     TextField("请输入标题（最多 40 字）", text: $title)
@@ -154,6 +173,11 @@ struct PuzzleEditorView: View {
         .navigationTitle(isEditMode ? "编辑题目" : "新建题目")
         .onAppear { loadPuzzle(editingPuzzle) }
         .onChange(of: editingPuzzle) { loadPuzzle(editingPuzzle) }
+        .sheet(isPresented: $showAISheet) {
+            AIPuzzleGeneratorSheet(config: generatorConfig) { puzzle in
+                applyGenerated(puzzle)
+            }
+        }
         .alert("确认删除", isPresented: $showDeleteAlert) {
             Button("删除", role: .destructive) {
                 if let puzzle = originalPuzzle {
@@ -183,6 +207,21 @@ struct PuzzleEditorView: View {
         answerError = nil
         hintError = nil
         authorError = nil
+    }
+
+    // MARK: - AI generation handoff
+
+    /// Apply an AI-drafted puzzle to the form. Doesn't save — the user must
+    /// review and click 保存. Validation runs immediately so any out-of-range
+    /// fields surface red borders.
+    private func applyGenerated(_ p: Puzzle) {
+        title      = p.title
+        difficulty = p.difficulty
+        scenario   = p.scenario
+        answer     = p.answer
+        hint       = p.hint ?? ""
+        author     = p.author
+        validateAll()
     }
 
     // MARK: - Save

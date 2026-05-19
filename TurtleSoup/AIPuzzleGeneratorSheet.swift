@@ -1,0 +1,199 @@
+import SwiftUI
+
+/// Sheet for AI-assisted puzzle drafting.
+///
+/// User types a one-line idea (+ optional difficulty), hits 生成, sees a preview
+/// of the AI-drafted puzzle, then 应用 to fill the editor fields. The user always
+/// has the final say — nothing is auto-saved.
+struct AIPuzzleGeneratorSheet: View {
+
+    /// Pre-built generator config. nil = proxy not configured; sheet shows
+    /// guidance instead of the input form.
+    let config: PuzzleGenerationService.Config?
+
+    /// Called with the user-approved puzzle when they tap 应用.
+    /// Parent fills its editor fields from this and dismisses the sheet.
+    let onApply: (Puzzle) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var idea: String = ""
+    @State private var difficulty: Puzzle.Difficulty = .medium
+    @State private var usePreferredDifficulty: Bool = false
+
+    @State private var isGenerating: Bool = false
+    @State private var generated: Puzzle? = nil
+    @State private var errorMessage: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+
+            if config == nil {
+                proxyMissingNotice
+            } else if let puzzle = generated {
+                previewPane(puzzle)
+            } else {
+                inputForm
+            }
+
+            Spacer(minLength: 0)
+
+            footer
+        }
+        .padding(24)
+        .frame(width: 560, height: 540)
+    }
+
+    // MARK: - Sections
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("AI 辅助出题", systemImage: "sparkles")
+                .font(.title3.weight(.semibold))
+            Text("写一句创意，Claude 帮你扩写成完整海龟汤。生成后你可随意修改。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var inputForm: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("创意 / 关键词").font(.subheadline.weight(.medium))
+                TextEditor(text: $idea)
+                    .frame(minHeight: 110)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
+                    )
+                Text("例：「一个考古学家在沙漠里挖出一台还在响的收音机」")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("指定目标难度", isOn: $usePreferredDifficulty)
+                if usePreferredDifficulty {
+                    Picker("难度", selection: $difficulty) {
+                        ForEach(Puzzle.Difficulty.allCases, id: \.self) { d in
+                            Text(d.rawValue).tag(d)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+            }
+
+            if let err = errorMessage {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func previewPane(_ puzzle: Puzzle) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                fieldRow("标题", puzzle.title)
+                fieldRow("难度", puzzle.difficulty.rawValue)
+                fieldRow("汤面", puzzle.scenario)
+                fieldRow("汤底", puzzle.answer)
+                if let hint = puzzle.hint, !hint.isEmpty {
+                    fieldRow("提示", hint)
+                }
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
+        )
+    }
+
+    private func fieldRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var proxyMissingNotice: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("尚未配置代理", systemImage: "exclamationmark.triangle")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text("AI 出题需要先在「设置 → Claude API → 代理 Base URL」里填好 Vercel 部署地址，并登录账号。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("取消") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+
+            Spacer()
+
+            if generated != nil {
+                Button("重新生成") {
+                    generated = nil
+                    errorMessage = nil
+                }
+                .disabled(isGenerating)
+
+                Button("应用到编辑器") {
+                    if let p = generated { onApply(p) }
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            } else {
+                Button {
+                    Task { await runGeneration() }
+                } label: {
+                    if isGenerating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("生成")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(config == nil || isGenerating || idea.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func runGeneration() async {
+        guard let config else { return }
+        isGenerating = true
+        errorMessage = nil
+        defer { isGenerating = false }
+
+        do {
+            let service = PuzzleGenerationService(config: config)
+            let puzzle = try await service.generate(
+                idea: idea.trimmingCharacters(in: .whitespacesAndNewlines),
+                difficulty: usePreferredDifficulty ? difficulty : nil
+            )
+            generated = puzzle
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
