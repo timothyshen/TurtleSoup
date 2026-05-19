@@ -6,7 +6,9 @@ struct SidebarView: View {
     @Binding var columnVisibility: NavigationSplitViewVisibility
     @Binding var sidebarTab: SidebarTab
     @Binding var editingPuzzle: Puzzle?
+    @Binding var selectedHistoryRecord: GameRecord?
     @Bindable var store: PuzzleStore
+    @Bindable var recordStore: GameRecordStore
     var publicStore: PublicPuzzleStore
     var onNew: () -> Void
     @AppStorage("claude_api_key") private var apiKey = ""
@@ -32,6 +34,7 @@ struct SidebarView: View {
                 Text("题库").tag(SidebarTab.library)
                 Text("出题").tag(SidebarTab.create)
                 Text("广场").tag(SidebarTab.square)
+                Text("历史").tag(SidebarTab.history)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -65,6 +68,16 @@ struct SidebarView: View {
                 }
             } else if sidebarTab == .create {
                 MyPuzzlesSidebarView(editingPuzzle: $editingPuzzle, store: store, onNew: onNew)
+            } else if sidebarTab == .history {
+                HistorySidebarList(
+                    recordStore: recordStore,
+                    selectedRecord: $selectedHistoryRecord
+                )
+                .onChange(of: selectedHistoryRecord) {
+                    if selectedHistoryRecord != nil {
+                        withAnimation { columnVisibility = .detailOnly }
+                    }
+                }
             } else {
                 PublicSquareView(
                     publicStore: publicStore,

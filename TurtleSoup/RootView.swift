@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum SidebarTab { case library, create, square }
+enum SidebarTab { case library, create, square, history }
 
 struct RootView: View {
 
@@ -12,6 +12,7 @@ struct RootView: View {
     @State private var sidebarTab: SidebarTab = .library
     @State private var editingPuzzle: Puzzle? = nil
     @State private var newPuzzleToken: UUID = UUID()
+    @State private var selectedHistoryRecord: GameRecord? = nil
     @State private var store = PuzzleStore()
     @State private var recordStore = GameRecordStore()
     @State private var publicStore = PublicPuzzleStore()
@@ -23,7 +24,9 @@ struct RootView: View {
                 columnVisibility: $columnVisibility,
                 sidebarTab: $sidebarTab,
                 editingPuzzle: $editingPuzzle,
+                selectedHistoryRecord: $selectedHistoryRecord,
                 store: store,
+                recordStore: recordStore,
                 publicStore: publicStore,
                 onNew: {
                     editingPuzzle = nil
@@ -54,6 +57,12 @@ struct RootView: View {
                     generatorConfig: makeGeneratorConfig()
                 )
                 .id(editingPuzzle?.id.uuidString ?? newPuzzleToken.uuidString)
+            case .history:
+                if let record = selectedHistoryRecord {
+                    HistoryDetailView(record: record).id(record.id)
+                } else {
+                    EmptyDetailView()
+                }
             }
         }
         .task(id: authService.user?.uid) {

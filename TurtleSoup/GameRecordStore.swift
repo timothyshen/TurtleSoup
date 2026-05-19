@@ -2,7 +2,12 @@ import CoreData
 import Observation
 
 /// Snapshot of one complete game session, used for persistence.
-struct GameRecord {
+struct GameRecord: Identifiable, Hashable {
+
+    static func == (lhs: GameRecord, rhs: GameRecord) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
+
     let id: UUID
     let puzzleID: UUID
     let puzzleTitle: String
@@ -240,6 +245,54 @@ final class GameRecordStore {
                                     puzzleID as CVarArg)
         let wins = (try? pc.ctx.count(for: req)) ?? 0
         return Double(wins) / Double(total)
+    }
+
+    /// Fetch every game record, fully hydrated (transcript + AI review),
+    /// sorted by start time descending. Drives the history viewer.
+    func allRecords() -> [GameRecord] {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
+        req.sortDescriptors = [NSSortDescriptor(key: "startedAt", ascending: false)]
+        guard let objs = try? pc.ctx.fetch(req) else { return [] }
+        return objs.compactMap { hydrate($0) }
+    }
+
+    private func hydrate(_ obj: NSManagedObject) -> GameRecord? {
+        guard
+            let id            = obj.value(forKey: "id")            as? UUID,
+            let puzzleID      = obj.value(forKey: "puzzleID")      as? UUID,
+            let puzzleTitle   = obj.value(forKey: "puzzleTitle")   as? String,
+            let startedAt     = obj.value(forKey: "startedAt")     as? Date,
+            let endedAt       = obj.value(forKey: "endedAt")       as? Date,
+            let isWon         = obj.value(forKey: "isWon")         as? Bool,
+            let questionCount = obj.value(forKey: "questionCount") as? Int32
+        else { return nil }
+
+        let msgs = (obj.value(forKey: "messages") as? Set<NSManagedObject>)?
+            .compactMap { msg -> Message? in
+                guard
+                    let mid     = msg.value(forKey: "id")        as? UUID,
+                    let roleRaw = msg.value(forKey: "role")      as? String,
+                    let role    = Message.Role(rawValue: roleRaw),
+                    let text    = msg.value(forKey: "text")      as? String,
+                    let ts      = msg.value(forKey: "timestamp") as? Date
+                else { return nil }
+                let verdict = (msg.value(forKey: "verdict") as? String)
+                    .flatMap(Message.Verdict.init(rawValue:))
+                return Message(id: mid, role: role, text: text, verdict: verdict, timestamp: ts)
+            }
+            .sorted { $0.timestamp < $1.timestamp } ?? []
+
+        return GameRecord(
+            id:            id,
+            puzzleID:      puzzleID,
+            puzzleTitle:   puzzleTitle,
+            startedAt:     startedAt,
+            endedAt:       endedAt,
+            isWon:         isWon,
+            questionCount: Int(questionCount),
+            messages:      msgs,
+            aiReview:      Self.decodeReview(obj)
+        )
     }
 
     func records(for puzzleID: UUID) -> [NSManagedObject] {
