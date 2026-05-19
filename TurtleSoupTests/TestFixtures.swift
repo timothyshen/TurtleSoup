@@ -111,3 +111,48 @@ private func sseEvents(_ events: [(name: String, data: String)]) -> Data {
     }
     return Data(out.utf8)
 }
+
+// MARK: - Proxy SSE envelopes
+//
+// These match the wire format documented in proxy/lib/sse-shape.ts and
+// consumed by Swift's ProxyStreamReader. Used to drive
+// PuzzleGenerationService.generateStream and ReviewService.generateStream
+// through MockURLProtocol.
+
+/// Build a sequence of `progress` events followed by `complete` carrying
+/// the given payload dict (serialized as JSON).
+func proxyStreamBody(progressEvents: [(field: String, value: String)],
+                     completePayload: [String: Any]) -> Data {
+    var pairs: [(name: String, data: String)] = progressEvents.map { p in
+        let json = #"{"field":"\#(p.field)","value":\#(jsonString(p.value))}"#
+        return ("progress", json)
+    }
+    let payloadData = try! JSONSerialization.data(withJSONObject: completePayload)
+    let payloadJSON = String(data: payloadData, encoding: .utf8)!
+    pairs.append(("complete", payloadJSON))
+    return sseEvents(pairs)
+}
+
+/// Build a stream that errors mid-flight. Emits any progress events the
+/// caller wants first, then an `error` event that should bubble up as a
+/// thrown `GenerationError` / `ReviewError` from the service.
+func proxyStreamError(progressEvents: [(field: String, value: String)] = [],
+                      code: String, message: String) -> Data {
+    var pairs: [(name: String, data: String)] = progressEvents.map { p in
+        let json = #"{"field":"\#(p.field)","value":\#(jsonString(p.value))}"#
+        return ("progress", json)
+    }
+    let errJSON = #"{"code":"\#(code)","message":\#(jsonString(message))}"#
+    pairs.append(("error", errJSON))
+    return sseEvents(pairs)
+}
+
+/// JSON-encode a string for use as a value in a JSON object. Wraps in
+/// quotes and escapes minimally — sufficient for test fixtures.
+private func jsonString(_ s: String) -> String {
+    let escaped = s
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: "\\n")
+    return "\"\(escaped)\""
+}

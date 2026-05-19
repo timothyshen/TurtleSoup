@@ -273,7 +273,144 @@ final class PuzzleGenerationServiceTests: XCTestCase {
         )
     }
 
+    // MARK: - Streaming
+
+    func testGenerateStreamEmitsProgressThenComplete() async throws {
+        let body = proxyStreamBody(
+            progressEvents: [
+                ("title",      "公园里的湿长椅"),
+                ("difficulty", "简单"),
+                ("scenario",   "李明清晨..."),
+                ("answer",     "前一晚有一对情侣..."),
+                ("hint",       "湿的来源"),
+            ],
+            completePayload: [
+                "puzzle": [
+                    "title":      "公园里的湿长椅",
+                    "scenario":   "李明清晨...",
+                    "answer":     "前一晚有一对情侣...",
+                    "hint":       "湿的来源",
+                    "difficulty": "简单",
+                ]
+            ]
+        )
+        MockURLProtocol.requestHandler = { _ in
+            (200, ["Content-Type": "text/event-stream"], body)
+        }
+
+        var seenProgress: [String] = []
+        var finalPuzzle: Puzzle? = nil
+
+        for try await event in makeService(token: "t").generateStream(idea: "湿长椅", difficulty: .easy) {
+            switch event {
+            case .progress(let field, _):
+                seenProgress.append(field)
+            case .complete(let puzzle):
+                finalPuzzle = puzzle
+            }
+        }
+
+        XCTAssertEqual(seenProgress,
+                       ["title", "difficulty", "scenario", "answer", "hint"],
+                       "progress events should be yielded in stream order")
+        XCTAssertEqual(finalPuzzle?.title,    "公园里的湿长椅")
+        XCTAssertEqual(finalPuzzle?.scenario, "李明清晨...")
+        XCTAssertEqual(finalPuzzle?.difficulty, .easy)
+        XCTAssertEqual(finalPuzzle?.author, "AI")
+    }
+
+    func testGenerateStreamRequestShape() async throws {
+        MockURLProtocol.requestHandler = { _ in
+            (200, ["Content-Type": "text/event-stream"],
+             proxyStreamBody(progressEvents: [], completePayload: minimalCompletePuzzlePayload()))
+        }
+
+        _ = try await consumeStream(
+            makeService(token: "tok_xyz").generateStream(idea: "x", difficulty: nil)
+        )
+
+        let rec = try XCTUnwrap(MockURLProtocol.lastRequest)
+        XCTAssertEqual(rec.url.absoluteString, "https://proxy.example.com/api/v1/generate-puzzle")
+        XCTAssertEqual(rec.headers["Authorization"], "Bearer tok_xyz")
+        XCTAssertEqual(rec.headers["Accept"], "text/event-stream",
+                       "Stream requests should advertise text/event-stream so caches don't fold them")
+
+        let obj = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: rec.bodyData) as? [String: Any]
+        )
+        XCTAssertEqual(obj["stream"] as? Bool, true,
+                       "generateStream must set stream:true so proxy takes the SSE branch")
+        XCTAssertEqual(obj["idea"] as? String, "x")
+    }
+
+    func testGenerateStreamErrorEventThrows() async {
+        let body = proxyStreamError(
+            progressEvents: [("title", "won't get past this")],
+            code: "parse_failed",
+            message: "Tool input did not parse"
+        )
+        MockURLProtocol.requestHandler = { _ in
+            (200, ["Content-Type": "text/event-stream"], body)
+        }
+
+        do {
+            for try await _ in makeService(token: "t").generateStream(idea: "x", difficulty: nil) {}
+            XCTFail("Expected error event to throw")
+        } catch let err as PuzzleGenerationService.GenerationError {
+            // Error events are surfaced through the same serverError case
+            // (code path repurposed to carry the SSE error payload as body).
+            XCTAssertTrue(err.errorDescription?.contains("parse_failed") ?? false)
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+    }
+
+    func testGenerateStreamSurfacesNon200() async {
+        MockURLProtocol.requestHandler = { _ in (401, [:], Data("denied".utf8)) }
+
+        do {
+            for try await _ in makeService(token: "t").generateStream(idea: "x", difficulty: nil) {}
+            XCTFail("Expected serverError")
+        } catch let err as PuzzleGenerationService.GenerationError {
+            switch err {
+            case .serverError(let code, let body):
+                XCTAssertEqual(code, 401)
+                XCTAssertTrue(body.contains("denied"))
+            default:
+                XCTFail("Wrong case: \(err)")
+            }
+        } catch {
+            XCTFail("Wrong type: \(error)")
+        }
+    }
+
+    func testGenerateStreamShortCircuitsOnTokenError() async {
+        struct Stub: LocalizedError { var errorDescription: String? { "no auth" } }
+        let cfg = PuzzleGenerationService.Config(
+            baseURL: URL(string: "https://proxy.example.com")!,
+            idTokenProvider: { throw Stub() }
+        )
+        let service = PuzzleGenerationService(config: cfg, session: session)
+
+        do {
+            for try await _ in service.generateStream(idea: "x", difficulty: nil) {}
+            XCTFail("Expected token provider error")
+        } catch let e as Stub {
+            XCTAssertEqual(e.errorDescription, "no auth")
+        } catch {
+            XCTFail("Wrong type: \(error)")
+        }
+        XCTAssertNil(MockURLProtocol.lastRequest, "Should not hit the network when token fetch fails")
+    }
+
     // MARK: - Helpers
+
+    /// Drain a stream and ignore values. Used when we only care about
+    /// side effects on MockURLProtocol.lastRequest.
+    private func consumeStream(_ stream: AsyncThrowingStream<PuzzleGenerationService.StreamEvent, Error>) async throws -> Bool {
+        for try await _ in stream {}
+        return true
+    }
 
     private func makeService(token: String) -> PuzzleGenerationService {
         let cfg = PuzzleGenerationService.Config(
@@ -285,6 +422,17 @@ final class PuzzleGenerationServiceTests: XCTestCase {
 }
 
 // MARK: - File-scope helpers
+
+private func minimalCompletePuzzlePayload() -> [String: Any] {
+    [
+        "puzzle": [
+            "title":      "t",
+            "scenario":   "s",
+            "answer":     "a",
+            "difficulty": "简单",
+        ]
+    ]
+}
 
 private func minimalSuccessBody() -> Data {
     """

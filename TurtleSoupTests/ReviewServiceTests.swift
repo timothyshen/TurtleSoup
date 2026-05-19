@@ -160,6 +160,149 @@ final class ReviewServiceTests: XCTestCase {
                      "No HTTP request should be made when token fetch fails")
     }
 
+    // MARK: - Streaming
+
+    func testGenerateStreamEmitsProgressThenComplete() async throws {
+        let body = proxyStreamBody(
+            progressEvents: [
+                ("summary", "你用 5 轮锁定了真相。"),
+                ("tip",     "下次先看物理约束"),
+            ],
+            completePayload: [
+                "review": [
+                    "summary": "你用 5 轮锁定了真相。",
+                    "key_moments": [
+                        ["turn": 1, "kind": "good_question", "comment": "切入角度对"],
+                        ["turn": 3, "kind": "breakthrough",  "comment": "想到隔音问题"],
+                    ],
+                    "tip": "下次先看物理约束",
+                ]
+            ]
+        )
+        MockURLProtocol.requestHandler = { _ in
+            (200, ["Content-Type": "text/event-stream"], body)
+        }
+
+        var seenProgress: [String] = []
+        var finalReview: GameReview? = nil
+
+        let stream = makeService(token: "t").generateStream(
+            puzzle: samplePuzzle(),
+            messages: sampleMessages(),
+            isWon: true,
+            questionCount: 5
+        )
+        for try await event in stream {
+            switch event {
+            case .progress(let field, _):
+                seenProgress.append(field)
+            case .complete(let review):
+                finalReview = review
+            }
+        }
+
+        XCTAssertEqual(seenProgress, ["summary", "tip"],
+                       "progress events for review only cover summary + tip (key_moments is an array)")
+        XCTAssertEqual(finalReview?.summary, "你用 5 轮锁定了真相。")
+        XCTAssertEqual(finalReview?.keyMoments.count, 2,
+                       "key_moments[] arrives in complete event, not via progress")
+        XCTAssertEqual(finalReview?.tip, "下次先看物理约束")
+    }
+
+    func testGenerateStreamRequestShape() async throws {
+        MockURLProtocol.requestHandler = { _ in
+            (200, ["Content-Type": "text/event-stream"],
+             proxyStreamBody(progressEvents: [], completePayload: minimalCompleteReviewPayload()))
+        }
+
+        let stream = makeService(token: "tok_xyz").generateStream(
+            puzzle: samplePuzzle(),
+            messages: sampleMessages(),
+            isWon: false,
+            questionCount: 3
+        )
+        for try await _ in stream {}
+
+        let rec = try XCTUnwrap(MockURLProtocol.lastRequest)
+        XCTAssertEqual(rec.url.absoluteString, "https://proxy.example.com/api/v1/generate-review")
+        XCTAssertEqual(rec.headers["Authorization"], "Bearer tok_xyz")
+        XCTAssertEqual(rec.headers["Accept"], "text/event-stream")
+
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: rec.bodyData) as? [String: Any])
+        XCTAssertEqual(obj["stream"] as? Bool, true)
+        XCTAssertEqual(obj["isWon"] as? Bool, false)
+        XCTAssertEqual(obj["questionCount"] as? Int, 3)
+        // system messages still filtered out of transcript on the streaming path.
+        let transcript = try XCTUnwrap(obj["transcript"] as? [[String: Any]])
+        XCTAssertEqual(transcript.count, 3)
+    }
+
+    func testGenerateStreamErrorEventThrows() async {
+        let body = proxyStreamError(code: "parse_failed", message: "bad JSON")
+        MockURLProtocol.requestHandler = { _ in
+            (200, ["Content-Type": "text/event-stream"], body)
+        }
+
+        do {
+            let stream = makeService(token: "t").generateStream(
+                puzzle: samplePuzzle(), messages: sampleMessages(),
+                isWon: true, questionCount: 1
+            )
+            for try await _ in stream {}
+            XCTFail("Expected error event to throw")
+        } catch let err as ReviewService.ReviewError {
+            XCTAssertTrue(err.errorDescription?.contains("parse_failed") ?? false)
+        } catch {
+            XCTFail("Wrong type: \(error)")
+        }
+    }
+
+    func testGenerateStreamSurfacesNon200() async {
+        MockURLProtocol.requestHandler = { _ in (500, [:], Data("upstream down".utf8)) }
+
+        do {
+            let stream = makeService(token: "t").generateStream(
+                puzzle: samplePuzzle(), messages: sampleMessages(),
+                isWon: true, questionCount: 1
+            )
+            for try await _ in stream {}
+            XCTFail("Expected serverError")
+        } catch let err as ReviewService.ReviewError {
+            switch err {
+            case .serverError(let code, let body):
+                XCTAssertEqual(code, 500)
+                XCTAssertTrue(body.contains("upstream down"))
+            default:
+                XCTFail("Wrong case: \(err)")
+            }
+        } catch {
+            XCTFail("Wrong type: \(error)")
+        }
+    }
+
+    func testGenerateStreamShortCircuitsOnTokenError() async {
+        struct Stub: LocalizedError { var errorDescription: String? { "denied" } }
+        let cfg = ReviewService.Config(
+            baseURL: URL(string: "https://proxy.example.com")!,
+            idTokenProvider: { throw Stub() }
+        )
+        let service = ReviewService(config: cfg, session: session)
+
+        do {
+            let stream = service.generateStream(
+                puzzle: samplePuzzle(), messages: sampleMessages(),
+                isWon: true, questionCount: 1
+            )
+            for try await _ in stream {}
+            XCTFail("Expected Stub")
+        } catch let e as Stub {
+            XCTAssertEqual(e.errorDescription, "denied")
+        } catch {
+            XCTFail("Wrong type: \(error)")
+        }
+        XCTAssertNil(MockURLProtocol.lastRequest)
+    }
+
     // MARK: - Helpers
 
     private func makeService(token: String) -> ReviewService {
@@ -180,6 +323,19 @@ private func sampleMessages() -> [Message] {
         Message(role: .user, text: "他认识凶手吗？"),
         Message(role: .assistant, text: "是", verdict: .yes),
         Message(role: .user, text: "他是亲属吗？"),
+    ]
+}
+
+private func minimalCompleteReviewPayload() -> [String: Any] {
+    [
+        "review": [
+            "summary": "s",
+            "key_moments": [
+                ["turn": 1, "kind": "good_question", "comment": "c"],
+                ["turn": 2, "kind": "breakthrough",  "comment": "c"],
+            ],
+            "tip": "t",
+        ]
     ]
 }
 
