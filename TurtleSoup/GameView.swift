@@ -109,9 +109,18 @@ struct GameView: View {
             )
 
             Button(action: vm.send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.4))
+                // Swap the send glyph for a small spinner while the model is
+                // thinking — pairs with TypingIndicator's caption to make the
+                // wait feel busy instead of frozen.
+                if vm.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.4))
+                }
             }
             .buttonStyle(.plain)
             .disabled(!canSend)

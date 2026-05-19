@@ -99,13 +99,30 @@ struct BubbleShape: Shape {
 }
 
 // MARK: - Typing indicator
+//
+// Non-streaming model calls return after the full JSON verdict is built — the
+// user sees nothing for the full ~1–4 s round trip. Three idle dots in that
+// window feel mechanical and stuck; cycling a short caption beside them
+// reframes the wait as the host actively thinking. Captions are deliberately
+// vague (no "正在调用 API"-style telemetry leak) and rotate slower than the
+// dots so the eye doesn't fight two animations at once.
 
 struct TypingIndicator: View {
     @State private var phase = 0
-    let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+    @State private var captionIndex = 0
+
+    private let dotTimer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+    private let captionTimer = Timer.publish(every: 1.6, on: .main, in: .common).autoconnect()
+
+    private let captions = [
+        "翻阅汤底…",
+        "斟酌答复…",
+        "比对线索…",
+        "审视提问…"
+    ]
 
     var body: some View {
-        HStack(alignment: .bottom) {
+        HStack(alignment: .center, spacing: 10) {
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
@@ -117,8 +134,22 @@ struct TypingIndicator: View {
             .padding(.vertical, 12)
             .background(Color(.secondarySystemBackground))
             .clipShape(BubbleShape(isUser: false))
+
+            // Cross-fade caption: changing .id forces a transition between
+            // identities, which lets .opacity actually fade rather than snap.
+            Text(captions[captionIndex])
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .id(captionIndex)
+                .transition(.opacity)
+
             Spacer()
         }
-        .onReceive(timer) { _ in phase = (phase + 1) % 3 }
+        .onReceive(dotTimer) { _ in phase = (phase + 1) % 3 }
+        .onReceive(captionTimer) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                captionIndex = (captionIndex + 1) % captions.count
+            }
+        }
     }
 }
