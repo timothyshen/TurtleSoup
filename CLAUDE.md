@@ -107,6 +107,7 @@
 - [x] 「打字中」UX 强化（循环 caption + send button spinner）
 - [x] Settings reminder：本地 key 路径下提示用户切代理
 - [ ] 部署 + 端到端联调（Vercel + Firebase 接入待用户手动完成）
+- [ ] **多人房间（iPhone 客户端）** — 设计文档 + Firestore schema + 安全规则已写（docs/plans/2026-05-19-multiplayer-rooms.md）；iPhone 客户端待启动。架构是 host-as-GM：主机本地持有汤底，调代理验证，写 verdict 到 Firestore；参与者只读 verdict。模式有 party（3-10 轮 + 排行榜）和 elimination（最后一人胜）。
 
 **已显式 drop**：微信登录（曾考虑混合方案 wx → Firebase Custom Token，需企业资质 + 复杂扫码流，决定只走 Apple + Email/Password）
 
