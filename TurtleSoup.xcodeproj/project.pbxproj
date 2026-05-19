@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		BBF314DC2FBD1110006206A4 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = BBF314DB2FBD1110006206A4 /* FirebaseAuth */; };
+		BBF314DE2FBD1114006206A4 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = BBF314DD2FBD1114006206A4 /* FirebaseCore */; };
+		BBF314E02FBD111B006206A4 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = BBF314DF2FBD111B006206A4 /* FirebaseFirestore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		BBF937FB2F7124D3001E4F63 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -30,17 +36,17 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		BBF937ED2F7124D2001E4F63 /* haiguitang */ = {
+		BBF937ED2F7124D2001E4F63 /* TurtleSoup */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TurtleSoup;
 			sourceTree = "<group>";
 		};
-		BBF937FD2F7124D3001E4F63 /* haiguitangTests */ = {
+		BBF937FD2F7124D3001E4F63 /* TurtleSoupTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TurtleSoupTests;
 			sourceTree = "<group>";
 		};
-		BBF938072F7124D3001E4F63 /* haiguitangUITests */ = {
+		BBF938072F7124D3001E4F63 /* TurtleSoupUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TurtleSoupUITests;
 			sourceTree = "<group>";
@@ -52,6 +58,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BBF314DE2FBD1114006206A4 /* FirebaseCore in Frameworks */,
+				BBF314DC2FBD1110006206A4 /* FirebaseAuth in Frameworks */,
+				BBF314E02FBD111B006206A4 /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -72,12 +81,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		BBF314DA2FBD1110006206A4 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		BBF937E22F7124D1001E4F63 = {
 			isa = PBXGroup;
 			children = (
-				BBF937ED2F7124D2001E4F63 /* haiguitang */,
-				BBF937FD2F7124D3001E4F63 /* haiguitangTests */,
-				BBF938072F7124D3001E4F63 /* haiguitangUITests */,
+				BBF937ED2F7124D2001E4F63 /* TurtleSoup */,
+				BBF937FD2F7124D3001E4F63 /* TurtleSoupTests */,
+				BBF938072F7124D3001E4F63 /* TurtleSoupUITests */,
+				BBF314DA2FBD1110006206A4 /* Frameworks */,
 				BBF937EC2F7124D2001E4F63 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,10 +125,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				BBF937ED2F7124D2001E4F63 /* haiguitang */,
+				BBF937ED2F7124D2001E4F63 /* TurtleSoup */,
 			);
 			name = haiguitang;
 			packageProductDependencies = (
+				BBF314DB2FBD1110006206A4 /* FirebaseAuth */,
+				BBF314DD2FBD1114006206A4 /* FirebaseCore */,
+				BBF314DF2FBD111B006206A4 /* FirebaseFirestore */,
 			);
 			productName = haiguitang;
 			productReference = BBF937EB2F7124D2001E4F63 /* haiguitang.app */;
@@ -131,7 +151,7 @@
 				BBF937FC2F7124D3001E4F63 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				BBF937FD2F7124D3001E4F63 /* haiguitangTests */,
+				BBF937FD2F7124D3001E4F63 /* TurtleSoupTests */,
 			);
 			name = haiguitangTests;
 			packageProductDependencies = (
@@ -154,7 +174,7 @@
 				BBF938062F7124D3001E4F63 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				BBF938072F7124D3001E4F63 /* haiguitangUITests */,
+				BBF938072F7124D3001E4F63 /* TurtleSoupUITests */,
 			);
 			name = haiguitangUITests;
 			packageProductDependencies = (
@@ -186,7 +206,7 @@
 					};
 				};
 			};
-			buildConfigurationList = BBF937E62F7124D1001E4F63 /* Build configuration list for PBXProject "haiguitang" */;
+			buildConfigurationList = BBF937E62F7124D1001E4F63 /* Build configuration list for PBXProject "TurtleSoup" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -195,6 +215,9 @@
 			);
 			mainGroup = BBF937E22F7124D1001E4F63;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				BBF314D92FBD1061006206A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BBF937EC2F7124D2001E4F63 /* Products */;
 			projectDirPath = "";
@@ -526,7 +549,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		BBF937E62F7124D1001E4F63 /* Build configuration list for PBXProject "haiguitang" */ = {
+		BBF937E62F7124D1001E4F63 /* Build configuration list for PBXProject "TurtleSoup" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				BBF9380C2F7124D3001E4F63 /* Debug */,
@@ -563,6 +586,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BBF314D92FBD1061006206A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.13.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BBF314DB2FBD1110006206A4 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BBF314D92FBD1061006206A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		BBF314DD2FBD1114006206A4 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BBF314D92FBD1061006206A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		BBF314DF2FBD111B006206A4 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BBF314D92FBD1061006206A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = BBF937E32F7124D1001E4F63 /* Project object */;
 }

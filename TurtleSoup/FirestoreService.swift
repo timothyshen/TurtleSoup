@@ -2,7 +2,7 @@ import Foundation
 import FirebaseFirestore
 import os.log
 
-struct FirestoreService: FirestoreServicing {
+nonisolated struct FirestoreService: FirestoreServicing {
 
     private let db = Firestore.firestore()
     private let logger = Logger(subsystem: "com.haiguitang", category: "Firestore")

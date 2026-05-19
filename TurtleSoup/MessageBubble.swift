@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine   // for Timer.publish(...).autoconnect()
 
 struct MessageBubble: View {
 
@@ -54,7 +55,7 @@ struct MessageBubble: View {
                 Text(message.text)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color(.secondarySystemBackground))
+                    .background(Color.secondary.opacity(0.15))
                     .clipShape(BubbleShape(isUser: false))
             }
             Spacer(minLength: 60)
@@ -77,7 +78,7 @@ struct MessageBubble: View {
         switch v {
         case .yes:  return (.green.opacity(0.15), .green)
         case .no:   return (.red.opacity(0.15), .red)
-        case .irr:  return (Color(.secondarySystemBackground), .secondary)
+        case .irr:  return (Color.secondary.opacity(0.15), .secondary)
         case .part: return (.orange.opacity(0.15), .orange)
         case .win:  return (.teal.opacity(0.15), .teal)
         }
@@ -132,7 +133,7 @@ struct TypingIndicator: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color(.secondarySystemBackground))
+            .background(Color.secondary.opacity(0.15))
             .clipShape(BubbleShape(isUser: false))
 
             // Cross-fade caption: changing .id forces a transition between

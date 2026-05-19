@@ -18,15 +18,22 @@ struct GameView: View {
     }
 
     var body: some View {
-        HSplitView {
+        // HStack (not HSplitView): HSplitView is an interactive resizable
+        // splitter that fights NavigationSplitView's sidebar-toggle
+        // animation, causing the toggle to freeze mid-transition. Since
+        // both columns here have fixed/min-width constraints anyway, the
+        // draggable divider added nothing.
+        HStack(spacing: 0) {
             // 左：对话主区
             chatPane
-                .frame(minWidth: 460)
+                .frame(minWidth: 460, maxWidth: .infinity)
+
+            Divider()
 
             // 右：汤面 + 控制面板
             infoPane
                 .frame(width: 260)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(.regularMaterial)
         }
         .navigationTitle(vm.puzzle.title)
         .navigationSubtitle("\(vm.questionCount) 问")
@@ -39,7 +46,10 @@ struct GameView: View {
         } message: {
             Text(vm.errorMessage ?? "")
         }
-        .onAppear { inputFocused = true }
+        .onAppear {
+            inputFocused = true
+            vm.loadPastReview()   // deferred CoreData fetch — see GameViewModel
+        }
     }
 
     // MARK: - Chat pane

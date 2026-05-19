@@ -272,7 +272,7 @@ struct AIPuzzleGeneratorSheet: View {
 
         do {
             let service = PuzzleGenerationService(config: config)
-            let stream = service.generateStream(
+            let stream = await service.generateStream(
                 idea: idea.trimmingCharacters(in: .whitespacesAndNewlines),
                 difficulty: usePreferredDifficulty ? difficulty : nil
             )

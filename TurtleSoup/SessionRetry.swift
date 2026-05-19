@@ -13,7 +13,8 @@ import Foundation
 /// Worth a single retry because the alternative — surfacing every flaky-
 /// Wi-Fi failure to the user — is noisy and unactionable. After two
 /// connection attempts though, we give up: real outages should fail loud.
-enum SessionRetry {
+// nonisolated: utility namespace, called from actor-typed services.
+nonisolated enum SessionRetry {
 
     /// Default 500ms backoff. Long enough that a routing/DNS hiccup has
     /// time to clear, short enough that the user doesn't notice. Caller

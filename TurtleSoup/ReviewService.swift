@@ -4,7 +4,10 @@ import Foundation
 ///
 /// Stored on `GameRecord` as a JSON-encoded string so we don't have to migrate
 /// CoreData every time we add a field. Renderable directly from this struct.
-struct GameReview: Codable, Equatable {
+// nonisolated under -default-isolation=MainActor so the synthesized
+// Codable conformance can be invoked from actor contexts (ReviewService,
+// FirestoreService, etc).
+nonisolated struct GameReview: Codable, Equatable {
     let summary: String
     let keyMoments: [Moment]
     let tip: String

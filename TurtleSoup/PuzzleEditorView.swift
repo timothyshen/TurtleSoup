@@ -151,7 +151,7 @@ struct PuzzleEditorView: View {
                     Spacer()
                     // 发布到广场（仅登录后且已保存的题目显示）
                     if let puzzle = originalPuzzle,
-                       let uid = authService?.user?.uid,
+                       let uid = authService?.uid,
                        let store = publicStore {
                         Button {
                             Task { await store.publish(puzzle, uid: uid) }

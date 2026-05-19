@@ -1,0 +1,18 @@
+# Xcode
+xcuserdata/
+*.xcodeproj/xcuserdata/
+**/Build*.txt
+DerivedData/
+
+# macOS
+.DS_Store
+
+# SwiftPM (Package.resolved IS checked in — see TurtleSoup.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/)
+.build/
+.swiftpm/
+
+# Proxy
+proxy/node_modules/
+proxy/.vercel
+proxy/.env
+proxy/.env.local

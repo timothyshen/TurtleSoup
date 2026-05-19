@@ -31,11 +31,9 @@ struct PublicSquareView: View {
                         .tag(puzzle)
                 }
                 .listStyle(.sidebar)
-                .onChange(of: selectedPuzzle) {
-                    if selectedPuzzle != nil {
-                        withAnimation { columnVisibility = .detailOnly }
-                    }
-                }
+                // Auto-collapse removed for the same reason as the library
+                // sidebar — see SidebarView.swift. macOS users can collapse
+                // the sidebar themselves via ⌘0 or the toolbar toggle.
             }
         }
         .task { await publicStore.fetchIfNeeded() }

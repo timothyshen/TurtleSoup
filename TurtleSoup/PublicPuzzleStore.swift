@@ -19,7 +19,7 @@ final class PublicPuzzleStore {
 
     func refresh() async {
         isLoading = true
-        puzzles = await firestore.fetchPublicPuzzles()
+        puzzles = await firestore.fetchPublicPuzzles(limit: 50)
         isLoading = false
     }
 

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Puzzle
 
-struct Puzzle: Identifiable, Codable, Hashable {
+nonisolated struct Puzzle: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
     var difficulty: Difficulty
@@ -57,7 +57,7 @@ struct Puzzle: Identifiable, Codable, Hashable {
 
 // MARK: - Message
 
-struct Message: Identifiable, Codable, Equatable {
+nonisolated struct Message: Identifiable, Codable, Equatable {
     let id: UUID
     let role: Role
     let text: String
@@ -121,7 +121,11 @@ struct Message: Identifiable, Codable, Equatable {
 
 // MARK: - Claude API response
 
-struct ClaudeAgentResponse: Decodable {
+// `nonisolated` because the project compiles with -default-isolation=MainActor.
+// Without this, the synthesized Decodable conformance is MainActor-isolated
+// and can't be called from `actor ClaudeService` where the response is
+// decoded. Codable types should always be free-floating.
+nonisolated struct ClaudeAgentResponse: Decodable {
     let verdict: String
     let comment: String
 }

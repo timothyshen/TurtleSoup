@@ -65,9 +65,9 @@ struct RootView: View {
                 }
             }
         }
-        .task(id: authService.user?.uid) {
+        .task(id: authService.uid) {
             // Runs on first appear AND every time uid changes (login/logout).
-            let uid = authService.user?.uid
+            let uid = authService.uid
             recordStore.currentUID = uid
             store.currentUID = uid
             if let uid {
@@ -76,7 +76,12 @@ struct RootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 900, minHeight: 600)
+        // Min width must accommodate: sidebar (~220) + GameView's chatPane
+        // minWidth (460) + infoPane fixed width (260) = 940. Add 60px buffer
+        // for column dividers, toolbar margins. Under-sized window caused
+        // sidebar-toggle animations to freeze mid-flight — SwiftUI thrashes
+        // on layout passes trying to fit content that doesn't fit.
+        .frame(minWidth: 1000, minHeight: 600)
     }
 
     /// Build a Claude transport based on current settings:

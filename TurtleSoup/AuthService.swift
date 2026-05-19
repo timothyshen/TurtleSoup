@@ -14,13 +14,20 @@ final class AuthService: NSObject {
     override init() {
         super.init()
         user = Auth.auth().currentUser
-        Auth.auth().addStateDidChangeListener { [weak self] _, user in
+        // Discard the returned handle — we never remove this listener because
+        // it lives for the lifetime of the app singleton anyway.
+        _ = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in self?.user = user }
         }
     }
 
     var isSignedIn: Bool { user != nil }
     var displayName: String { user?.displayName ?? user?.email ?? "未登录" }
+    /// Convenience for call sites that just want the uid without having to
+    /// `import FirebaseAuth` to access `user.uid`. Swift's strict module
+    /// imports otherwise require every file that touches `user.uid` to
+    /// import the Firebase module too.
+    var uid: String? { user?.uid }
 
     // MARK: - Email / Password
 

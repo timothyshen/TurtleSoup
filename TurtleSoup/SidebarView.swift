@@ -59,13 +59,13 @@ struct SidebarView: View {
                 }
                 .listStyle(.sidebar)
                 .searchable(text: $searchText, placement: .sidebar, prompt: "搜索谜题")
-                .onChange(of: selectedPuzzle) {
-                    if selectedPuzzle != nil {
-                        withAnimation {
-                            columnVisibility = .detailOnly  // ← 选题后收起
-                        }
-                    }
-                }
+                // Auto-collapse on select was removed: it conflicted with
+                // macOS's native NavigationSplitView sidebar toggle. The
+                // user clicking the top-left chevron to re-show the sidebar
+                // would race against the binding we'd written to .detailOnly,
+                // freezing the transition animation. Macs have screen space —
+                // leave both columns up by default; user can manually
+                // collapse via ⌘0 or the toolbar toggle.
             } else if sidebarTab == .create {
                 MyPuzzlesSidebarView(editingPuzzle: $editingPuzzle, store: store, onNew: onNew)
             } else if sidebarTab == .history {
@@ -73,11 +73,6 @@ struct SidebarView: View {
                     recordStore: recordStore,
                     selectedRecord: $selectedHistoryRecord
                 )
-                .onChange(of: selectedHistoryRecord) {
-                    if selectedHistoryRecord != nil {
-                        withAnimation { columnVisibility = .detailOnly }
-                    }
-                }
             } else {
                 PublicSquareView(
                     publicStore: publicStore,
@@ -126,10 +121,14 @@ struct SidebarView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             if apiKey.isEmpty {
-                Button("前往设置") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                // SettingsLink is the macOS 14+ way to open the Settings
+                // scene. The old NSApp.sendAction(showSettingsWindow:)
+                // hack now triggers a runtime warning telling you to
+                // switch to this.
+                SettingsLink {
+                    Text("前往设置")
+                        .font(.caption)
                 }
-                .font(.caption)
                 .buttonStyle(.link)
             }
         }

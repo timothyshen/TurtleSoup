@@ -16,7 +16,7 @@ import Foundation
 /// This is intentionally narrower than Anthropic's native SSE — clients
 /// only need to handle three event types, and the heavy lifting (partial
 /// JSON extraction, field-close detection) happens server-side.
-enum ProxyStreamEvent: Equatable {
+nonisolated enum ProxyStreamEvent: Equatable {
     case progress(field: String, value: String)
     /// Decoded body of the `complete` event. Caller drills into specific
     /// keys (`puzzle`, `review`) using its known schema.
@@ -43,7 +43,9 @@ enum ProxyStreamEvent: Equatable {
 /// Reads SSE event blocks off a URLSession byte stream and emits structured
 /// events. Centralizes the "wait for blank line, parse event:/data:" loop
 /// so PuzzleGenerationService and ReviewService don't duplicate it.
-struct ProxyStreamReader {
+// nonisolated: a pure parser shared by actor-typed services. No state of
+// its own; safe to call from any isolation.
+nonisolated struct ProxyStreamReader {
 
     /// Stream events from `bytes`. Caller is responsible for having
     /// already validated the HTTP status (this iterator assumes 200).

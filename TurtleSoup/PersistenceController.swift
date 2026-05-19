@@ -1,7 +1,12 @@
 import CoreData
 import os.log
 
-final class PersistenceController {
+// nonisolated: this is a shared utility used from MainActor stores and
+// background actor services alike. Without the marker, -default-isolation
+// =MainActor makes `.shared` and `init()` MainActor-bound, which throws
+// warnings (Swift 5) / errors (Swift 6) when any non-MainActor caller
+// uses them.
+nonisolated final class PersistenceController {
 
     private let logger = Logger(subsystem: "com.haiguitang", category: "CoreData")
 
