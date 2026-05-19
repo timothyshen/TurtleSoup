@@ -92,9 +92,17 @@ final class ClaudeServiceTests: XCTestCase {
         XCTAssertEqual(obj["model"] as? String, "claude-sonnet-4-6")
         XCTAssertEqual(obj["output_config"] as? [String: String], ["effort": "low"])
         XCTAssertEqual(obj["thinking"] as? [String: String], ["type": "disabled"])
-        let systemPrompt = try XCTUnwrap(obj["system"] as? String)
-        XCTAssertTrue(systemPrompt.contains(samplePuzzle().answer),
+
+        // System prompt now ships as a text-block array so cache_control can attach.
+        let systemBlocks = try XCTUnwrap(obj["system"] as? [[String: Any]])
+        XCTAssertEqual(systemBlocks.count, 1)
+        let firstBlock = try XCTUnwrap(systemBlocks.first)
+        XCTAssertEqual(firstBlock["type"] as? String, "text")
+        let systemText = try XCTUnwrap(firstBlock["text"] as? String)
+        XCTAssertTrue(systemText.contains(samplePuzzle().answer),
                       "system prompt should embed the answer (汤底) server-side equivalent path")
+        XCTAssertEqual(firstBlock["cache_control"] as? [String: String], ["type": "ephemeral"],
+                       "cache_control hook should be present even though prompt is currently below the 2048-token threshold")
 
         let messages = try XCTUnwrap(obj["messages"] as? [[String: Any]])
         XCTAssertEqual(messages.count, 1)

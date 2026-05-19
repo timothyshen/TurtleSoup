@@ -86,10 +86,25 @@ actor ClaudeService {
         // - effort=low + thinking disabled: gameplay turns are short JSON verdicts;
         //   skill doc notes this matches/beats Sonnet 4.5 (no-thinking) on chat workloads.
         // - Sonnet 4.6 defaults to effort=high — must set explicitly or latency/cost balloon.
+        //
+        // cache_control hook: today the system prompt is ~400-700 tokens, well under
+        // Sonnet 4.6's 2048-token cache minimum, so this will silently no-op
+        // (response.usage.cache_creation_input_tokens will be 0). Kept anyway so that
+        // once we add brand-voice guidelines / extended verdict rubrics / dialog
+        // history summaries, caching activates automatically without a code change.
+        // Within a single game session the system prompt is byte-identical across
+        // turns (汤底 doesn't change), so cache hit rate will be 100% per puzzle
+        // once we cross the threshold.
         let body: [String: Any] = [
             "model": "claude-sonnet-4-6",
             "max_tokens": 150,
-            "system": systemPrompt(for: puzzle),
+            "system": [
+                [
+                    "type": "text",
+                    "text": systemPrompt(for: puzzle),
+                    "cache_control": ["type": "ephemeral"]
+                ]
+            ],
             "thinking": ["type": "disabled"],
             "output_config": ["effort": "low"],
             "messages": messages
