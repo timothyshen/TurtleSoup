@@ -106,8 +106,9 @@
 - [x] Sonnet 4.6 升级 + prompt caching
 - [x] 「打字中」UX 强化（循环 caption + send button spinner）
 - [x] Settings reminder：本地 key 路径下提示用户切代理
-- [ ] 微信登录（资质待查；混合方案：wx → Firebase Custom Token）
 - [ ] 部署 + 端到端联调（Vercel + Firebase 接入待用户手动完成）
+
+**已显式 drop**：微信登录（曾考虑混合方案 wx → Firebase Custom Token，需企业资质 + 复杂扫码流，决定只走 Apple + Email/Password）
 
 ## 未解决问题
 - API Key 存于 UserDefaults，生产环境应迁移到 Keychain（或彻底切代理路径后删除 .direct 模式）。N1 已加 Settings 橙色 reminder。
