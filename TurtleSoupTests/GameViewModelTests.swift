@@ -212,7 +212,11 @@ final class GameViewModelTests: XCTestCase {
 
     private func makeVM(puzzle: Puzzle? = nil, isPublic: Bool = false) -> GameViewModel {
         let p = puzzle ?? makePuzzle()
-        let claude = ClaudeService(transport: .direct(apiKey: "test-key"), session: session)
+        let cfg = ClaudeService.Config(
+            baseURL: URL(string: "https://proxy.example.com")!,
+            idTokenProvider: { "test-token" }
+        )
+        let claude = ClaudeService(config: cfg, session: session)
         return GameViewModel(puzzle: p, claude: claude, recordStore: recordStore, isPublicPuzzle: isPublic)
     }
 

@@ -22,51 +22,33 @@ final class ClaudeServiceTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - Direct mode
+    // MARK: - Proxy request shape
 
-    func testDirectModeSetsAnthropicHeaders() async throws {
-        MockURLProtocol.requestHandler = { _ in (200, [:], anthropicSuccessBody(verdict: "irr", comment: "")) }
-
-        let service = ClaudeService(transport: .direct(apiKey: "sk-test-123"), session: session)
-        _ = try await service.send(userInput: "hi", history: [], puzzle: samplePuzzle())
-
-        let rec = try XCTUnwrap(MockURLProtocol.lastRequest)
-        XCTAssertEqual(rec.method, "POST")
-        XCTAssertEqual(rec.url.absoluteString, "https://api.anthropic.com/v1/messages")
-        XCTAssertEqual(rec.headers["x-api-key"], "sk-test-123")
-        XCTAssertEqual(rec.headers["anthropic-version"], "2023-06-01")
-        XCTAssertEqual(rec.headers["Content-Type"], "application/json")
-        XCTAssertNil(rec.headers["Authorization"], "direct mode must not send a Bearer token")
-    }
-
-    // MARK: - Proxy mode
-
-    func testProxyModeSetsBearerAndHitsDerivedURL() async throws {
+    func testRequestHitsProxyURLWithBearerToken() async throws {
         MockURLProtocol.requestHandler = { _ in (200, [:], anthropicSuccessBody(verdict: "yes", comment: "对")) }
 
-        let service = ClaudeService(
-            transport: .proxy(baseURL: URL(string: "https://proxy.example.com")!,
-                              idTokenProvider: { "tok_xyz" }),
-            session: session
-        )
+        let service = makeService(token: "tok_xyz")
         _ = try await service.send(userInput: "hi", history: [], puzzle: samplePuzzle())
 
         let rec = try XCTUnwrap(MockURLProtocol.lastRequest)
         XCTAssertEqual(rec.method, "POST")
         XCTAssertEqual(rec.url.absoluteString, "https://proxy.example.com/api/v1/messages")
         XCTAssertEqual(rec.headers["Authorization"], "Bearer tok_xyz")
-        XCTAssertNil(rec.headers["x-api-key"], "proxy mode must not leak the local key")
-        XCTAssertNil(rec.headers["anthropic-version"], "anthropic-version is injected server-side")
+        XCTAssertEqual(rec.headers["Content-Type"], "application/json")
+        // No x-api-key — proxy injects the Anthropic key server-side.
+        XCTAssertNil(rec.headers["x-api-key"])
+        // No anthropic-version — proxy sets it server-side.
+        XCTAssertNil(rec.headers["anthropic-version"])
     }
 
-    func testProxyTokenProviderErrorSurfaces() async {
+    func testTokenProviderErrorShortCircuits() async {
         struct Boom: LocalizedError { var errorDescription: String? { "token denied" } }
 
-        let service = ClaudeService(
-            transport: .proxy(baseURL: URL(string: "https://proxy.example.com")!,
-                              idTokenProvider: { throw Boom() }),
-            session: session
+        let cfg = ClaudeService.Config(
+            baseURL: URL(string: "https://proxy.example.com")!,
+            idTokenProvider: { throw Boom() }
         )
+        let service = ClaudeService(config: cfg, session: session)
         do {
             _ = try await service.send(userInput: "hi", history: [], puzzle: samplePuzzle())
             XCTFail("Expected token provider error")
@@ -83,7 +65,7 @@ final class ClaudeServiceTests: XCTestCase {
     func testRequestBodyContainsSystemAndUserMessage() async throws {
         MockURLProtocol.requestHandler = { _ in (200, [:], anthropicSuccessBody(verdict: "irr", comment: "")) }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         _ = try await service.send(userInput: "他活着吗？", history: [], puzzle: samplePuzzle())
 
         let body = try XCTUnwrap(MockURLProtocol.lastRequest?.bodyData)
@@ -121,7 +103,7 @@ final class ClaudeServiceTests: XCTestCase {
             Message(role: .assistant, text: "无关", verdict: .irr),
         ]
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         _ = try await service.send(userInput: "他认识凶手？", history: history, puzzle: samplePuzzle())
 
         let body = try XCTUnwrap(MockURLProtocol.lastRequest?.bodyData)
@@ -148,7 +130,7 @@ final class ClaudeServiceTests: XCTestCase {
     func testParsesPlainJSONResponse() async throws {
         MockURLProtocol.requestHandler = { _ in (200, [:], anthropicSuccessBody(verdict: "yes", comment: "对")) }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         let resp = try await service.send(userInput: "x", history: [], puzzle: samplePuzzle())
         XCTAssertEqual(resp.verdict, "yes")
         XCTAssertEqual(resp.comment, "对")
@@ -161,7 +143,7 @@ final class ClaudeServiceTests: XCTestCase {
         let wrapped = "```json\n\(inner)\n```"
         MockURLProtocol.requestHandler = { _ in (200, [:], anthropicEnvelope(text: wrapped)) }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         let resp = try await service.send(userInput: "x", history: [], puzzle: samplePuzzle())
         XCTAssertEqual(resp.verdict, "part")
         XCTAssertEqual(resp.comment, "接近了")
@@ -174,7 +156,7 @@ final class ClaudeServiceTests: XCTestCase {
             (200, [:], anthropicEnvelope(text: "I refuse to answer in JSON."))
         }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         let resp = try await service.send(userInput: "x", history: [], puzzle: samplePuzzle())
         XCTAssertEqual(resp.verdict, "irr")
         XCTAssertEqual(resp.comment, "")
@@ -184,7 +166,7 @@ final class ClaudeServiceTests: XCTestCase {
         let body = #"{"content": []}"#.data(using: .utf8)!
         MockURLProtocol.requestHandler = { _ in (200, [:], body) }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         do {
             _ = try await service.send(userInput: "x", history: [], puzzle: samplePuzzle())
             XCTFail("Expected emptyResponse error")
@@ -216,7 +198,7 @@ final class ClaudeServiceTests: XCTestCase {
              ))
         }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         var events: [String] = []
         var finalResponse: ClaudeAgentResponse? = nil
 
@@ -261,7 +243,7 @@ final class ClaudeServiceTests: XCTestCase {
             return (200, ["Content-Type": "text/event-stream"], Data(body.utf8))
         }
 
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         var finalResponse: ClaudeAgentResponse? = nil
         for try await event in service.sendStream(userInput: "x", history: [], puzzle: samplePuzzle()) {
             if case .complete(let r) = event { finalResponse = r }
@@ -272,7 +254,7 @@ final class ClaudeServiceTests: XCTestCase {
 
     func testStreamThrowsAPIErrorOnNon200() async {
         MockURLProtocol.requestHandler = { _ in (401, [:], Data("denied".utf8)) }
-        let service = ClaudeService(transport: .direct(apiKey: "k"), session: session)
+        let service = makeService(token: "test")
         do {
             for try await _ in service.sendStream(userInput: "x", history: [], puzzle: samplePuzzle()) {}
             XCTFail("Expected apiError")
@@ -303,7 +285,7 @@ final class ClaudeServiceTests: XCTestCase {
         let body = #"{"error":{"type":"invalid_request_error","message":"bad key"}}"#.data(using: .utf8)!
         MockURLProtocol.requestHandler = { _ in (401, [:], body) }
 
-        let service = ClaudeService(transport: .direct(apiKey: "bad"), session: session)
+        let service = makeService(token: "test")
         do {
             _ = try await service.send(userInput: "x", history: [], puzzle: samplePuzzle())
             XCTFail("Expected apiError")
@@ -317,6 +299,20 @@ final class ClaudeServiceTests: XCTestCase {
         } catch {
             XCTFail("Wrong error type: \(error)")
         }
+    }
+
+    // MARK: - Helpers
+
+    /// Build a ClaudeService backed by the mocked session, bound to a stable
+    /// proxy URL and a constant id token. Tests that only care about
+    /// happy-path behavior use this so each call site doesn't have to
+    /// repeat the Config construction.
+    private func makeService(token: String) -> ClaudeService {
+        let cfg = ClaudeService.Config(
+            baseURL: URL(string: "https://proxy.example.com")!,
+            idTokenProvider: { token }
+        )
+        return ClaudeService(config: cfg, session: session)
     }
 }
 

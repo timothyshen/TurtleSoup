@@ -2,38 +2,27 @@ import Foundation
 
 actor ClaudeService {
 
-    /// How the service reaches Claude.
-    ///
-    /// - `.direct`: hit Anthropic directly with the user's local API key.
-    ///   Used for offline dev and as a fallback when no proxy is configured.
-    ///   ⚠️ Ships the API key from the device — only safe for personal use.
-    /// - `.proxy`: hit the haiguitang Vercel proxy at `baseURL/api/v1/messages`,
-    ///   which injects the Anthropic key server-side and gates requests with
-    ///   a Firebase ID Token. `baseURL` is the deployment root, e.g.
-    ///   `https://haiguitang.vercel.app`.
-    enum Transport {
-        case direct(apiKey: String)
-        case proxy(baseURL: URL, idTokenProvider: @Sendable () async throws -> String)
+    /// All Claude calls go through the haiguitang Vercel proxy. The proxy
+    /// injects the Anthropic key server-side and gates requests with a
+    /// Firebase ID Token. Users never supply their own key.
+    struct Config {
+        /// Vercel deployment root, e.g. `https://haiguitang.vercel.app`.
+        /// `/api/v1/messages` is appended per request.
+        let baseURL: URL
+        /// Fetches a fresh Firebase ID Token for the current user.
+        let idTokenProvider: @Sendable () async throws -> String
     }
 
-    private let transport: Transport
+    private let config: Config
     private let session: URLSession
-    private static let anthropicDirectURL =
-        URL(string: "https://api.anthropic.com/v1/messages")!
 
     /// - Parameters:
-    ///   - transport: Direct (with API key) or proxy (with baseURL + token provider).
+    ///   - config: Proxy base URL + ID token provider.
     ///   - session: Customizable for tests (inject a `URLSession` configured
     ///     with `MockURLProtocol`). Defaults to `.shared`.
-    init(transport: Transport, session: URLSession = .shared) {
-        self.transport = transport
+    init(config: Config, session: URLSession = .shared) {
+        self.config = config
         self.session = session
-    }
-
-    /// Backwards-compatible convenience for callers that still pass a raw API key.
-    init(apiKey: String) {
-        self.transport = .direct(apiKey: apiKey)
-        self.session = .shared
     }
 
     // MARK: - System prompt builder
@@ -125,28 +114,15 @@ actor ClaudeService {
 
     private func buildRequest(body: [String: Any]) async throws -> URLRequest {
         let bodyData = try JSONSerialization.data(withJSONObject: body)
-
-        switch transport {
-        case .direct(let apiKey):
-            var req = URLRequest(url: Self.anthropicDirectURL)
-            req.httpMethod = "POST"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.setValue(apiKey,             forHTTPHeaderField: "x-api-key")
-            req.setValue("2023-06-01",       forHTTPHeaderField: "anthropic-version")
-            req.httpBody = bodyData
-            return req
-
-        case .proxy(let baseURL, let tokenProvider):
-            let token = try await tokenProvider()
-            let endpoint = baseURL.appendingPathComponent("api/v1/messages")
-            var req = URLRequest(url: endpoint)
-            req.httpMethod = "POST"
-            req.setValue("application/json",       forHTTPHeaderField: "Content-Type")
-            req.setValue("Bearer \(token)",        forHTTPHeaderField: "Authorization")
-            // anthropic-version not needed: the proxy sets it server-side.
-            req.httpBody = bodyData
-            return req
-        }
+        let token = try await config.idTokenProvider()
+        let endpoint = config.baseURL.appendingPathComponent("api/v1/messages")
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json",       forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)",        forHTTPHeaderField: "Authorization")
+        // anthropic-version not needed: the proxy sets it server-side.
+        req.httpBody = bodyData
+        return req
     }
 
     // MARK: - Parsing
@@ -362,13 +338,11 @@ actor ClaudeService {
         case apiError(String)
         case emptyResponse
         case notSignedIn
-        case proxyMisconfigured(String)
         var errorDescription: String? {
             switch self {
-            case .apiError(let s):              return "API 错误：\(s)"
-            case .emptyResponse:                return "响应为空"
-            case .notSignedIn:                  return "未登录，无法使用云端代理"
-            case .proxyMisconfigured(let msg):  return "代理配置错误：\(msg)"
+            case .apiError(let s): return "API 错误：\(s)"
+            case .emptyResponse:   return "响应为空"
+            case .notSignedIn:     return "未登录，请先登录账号"
             }
         }
     }

@@ -4,8 +4,6 @@ enum SidebarTab { case library, create, square, history }
 
 struct RootView: View {
 
-    @AppStorage("claude_api_key") private var apiKey = ""
-    @AppStorage("proxy_endpoint") private var proxyEndpoint = ""
     @Environment(AuthService.self) private var authService
     @State private var selectedPuzzle: Puzzle? = nil
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -39,7 +37,7 @@ struct RootView: View {
                 if let puzzle = selectedPuzzle {
                     GameView(
                         puzzle: puzzle,
-                        transport: makeTransport(),
+                        claudeConfig: makeClaudeConfig(),
                         recordStore: recordStore,
                         reviewConfig: makeReviewConfig(),
                         isPublicPuzzle: sidebarTab == .square
@@ -84,42 +82,23 @@ struct RootView: View {
         .frame(minWidth: 1000, minHeight: 600)
     }
 
-    /// Build a Claude transport based on current settings:
-    /// - If `proxy_endpoint` is set, route through the haiguitang Vercel proxy
-    ///   and authenticate with a fresh Firebase ID Token.
-    /// - Otherwise, fall back to direct Anthropic calls with the local API key.
-    private func makeTransport() -> ClaudeService.Transport {
-        if !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) {
-            // Capture authService weakly via reference; closure hops to MainActor
-            // on `await` since getIDToken is @MainActor-isolated.
-            return .proxy(baseURL: url) { [authService] in
-                try await authService.getIDToken()
-            }
-        } else {
-            return .direct(apiKey: apiKey)
-        }
-    }
-
-    /// Build a generator config from the same proxy settings. Returns nil if
-    /// no proxy is configured — AI puzzle generation requires the proxy
-    /// (we don't want to expose tool_use orchestration via direct key paths).
-    private func makeGeneratorConfig() -> PuzzleGenerationService.Config? {
-        guard !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) else {
-            return nil
-        }
-        return PuzzleGenerationService.Config(baseURL: url) { [authService] in
+    /// Build a Claude proxy config. All three services share the same
+    /// baseURL (hardcoded in AppConfig) + the same ID token provider, so
+    /// the three helpers are nearly identical — just different struct types.
+    private func makeClaudeConfig() -> ClaudeService.Config {
+        ClaudeService.Config(baseURL: AppConfig.proxyBaseURL) { [authService] in
             try await authService.getIDToken()
         }
     }
 
-    /// Same gating as makeGeneratorConfig — review generation also lives on
-    /// the proxy. Returns nil if proxy isn't configured, which hides the
-    /// "生成 AI 复盘" button entirely rather than showing a non-functional one.
-    private func makeReviewConfig() -> ReviewService.Config? {
-        guard !proxyEndpoint.isEmpty, let url = URL(string: proxyEndpoint) else {
-            return nil
+    private func makeGeneratorConfig() -> PuzzleGenerationService.Config {
+        PuzzleGenerationService.Config(baseURL: AppConfig.proxyBaseURL) { [authService] in
+            try await authService.getIDToken()
         }
-        return ReviewService.Config(baseURL: url) { [authService] in
+    }
+
+    private func makeReviewConfig() -> ReviewService.Config {
+        ReviewService.Config(baseURL: AppConfig.proxyBaseURL) { [authService] in
             try await authService.getIDToken()
         }
     }

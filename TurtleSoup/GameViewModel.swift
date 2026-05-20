@@ -73,10 +73,10 @@ final class GameViewModel {
         pastReview = recordStore.latestReview(for: puzzle.id)
     }
 
-    convenience init(puzzle: Puzzle, transport: ClaudeService.Transport, recordStore: GameRecordStore, isPublicPuzzle: Bool = false) {
+    convenience init(puzzle: Puzzle, claudeConfig: ClaudeService.Config, recordStore: GameRecordStore, isPublicPuzzle: Bool = false) {
         self.init(
             puzzle: puzzle,
-            claude: ClaudeService(transport: transport),
+            claude: ClaudeService(config: claudeConfig),
             recordStore: recordStore,
             isPublicPuzzle: isPublicPuzzle
         )

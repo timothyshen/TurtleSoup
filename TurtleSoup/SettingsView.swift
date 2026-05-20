@@ -1,10 +1,15 @@
 import SwiftUI
 import AuthenticationServices
 
+/// Settings.
+///
+/// As of P3 this is just account login. The Claude API is provided by the
+/// app (proxy URL hardcoded in AppConfig); users never see a key field
+/// or a proxy URL field. A connectivity probe is included so the user can
+/// verify the proxy is reachable before starting a game — it's the only
+/// network-related affordance left in the UI.
 struct SettingsView: View {
 
-    @AppStorage("claude_api_key") private var apiKey = ""
-    @AppStorage("proxy_endpoint") private var proxyEndpoint = ""
     @State var authService: AuthService
 
     @State private var email = ""
@@ -13,9 +18,6 @@ struct SettingsView: View {
     @State private var errorMessage: String?
     @State private var isLoading = false
 
-    /// Result of the most recent "测试连接" attempt. Cleared on any field
-    /// edit so a stale green check doesn't reassure after the user edits
-    /// the URL or key.
     @State private var probeStatus: ProbeStatus = .idle
     enum ProbeStatus: Equatable {
         case idle
@@ -26,43 +28,6 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            // MARK: Claude API
-            Section("Claude API") {
-                TextField("代理 Base URL", text: $proxyEndpoint, prompt: Text("https://xxx.vercel.app"))
-                    .textContentType(.URL)
-                    .autocorrectionDisabled()
-                Text("Vercel 部署根路径（不要带 /api/...）。填写后所有请求走云端代理，需要登录；留空则走下方本地 API Key。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                SecureField("本地 API Key", text: $apiKey)
-                    .textContentType(.password)
-                Text("仅在代理 Endpoint 留空时使用。生产环境建议改用代理。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                // Nudge users off the .direct path. Triggers only when they
-                // have a key configured but no proxy — i.e. they could switch
-                // and didn't. Silent when both are empty (new install) or
-                // when proxy is already on.
-                if proxyEndpoint.isEmpty && !apiKey.isEmpty {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        Text("当前走本地 key 直连 Anthropic — 该模式不支持 AI 出题 / AI 复盘，且 key 明文存于 UserDefaults。生产请配置上面的代理 Base URL 并登录。")
-                            .font(.caption)
-                    }
-                    .padding(8)
-                    .background(Color.orange.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-
-                // Connectivity probe — talks to whichever path is configured.
-                // Avoids the "I filled in the URL but does it actually work?"
-                // moment of doubt before the user starts a game.
-                connectivityProbe
-            }
-
             // MARK: Account
             Section("账号") {
                 if authService.isSignedIn {
@@ -112,6 +77,14 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            // MARK: Connectivity diagnostic
+            Section("连接诊断") {
+                connectivityProbe
+                Text("点击测试 Claude 代理是否在线。游戏 / AI 出题 / AI 复盘都需要代理可达 + 已登录。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 420)
@@ -129,7 +102,7 @@ struct SettingsView: View {
                 Label("测试连接", systemImage: "antenna.radiowaves.left.and.right")
             }
             .controlSize(.small)
-            .disabled(probeStatus == .running || !canProbe)
+            .disabled(probeStatus == .running)
 
             switch probeStatus {
             case .idle:
@@ -151,32 +124,12 @@ struct SettingsView: View {
         }
     }
 
-    /// True when there's something testable: either a proxy URL or a local
-    /// key. Both empty → no probe target.
-    private var canProbe: Bool {
-        !proxyEndpoint.isEmpty || !apiKey.isEmpty
-    }
-
+    /// Hit the proxy's /api/health endpoint. Auth gate is not exercised
+    /// here (would cost a Claude call); auth failures surface naturally
+    /// on first real use.
     private func runProbe() async {
         probeStatus = .running
-
-        if !proxyEndpoint.isEmpty {
-            await probeProxy()
-        } else {
-            await probeDirectKey()
-        }
-    }
-
-    /// For proxy mode, hit /api/health. We don't validate the auth gate
-    /// here — that requires being signed in AND a real Claude call, which
-    /// costs tokens. The smoke-test endpoint tells us the proxy is up;
-    /// auth failures will surface naturally on first real use.
-    private func probeProxy() async {
-        guard let base = URL(string: proxyEndpoint) else {
-            probeStatus = .failure("URL 不合法")
-            return
-        }
-        let health = base.appendingPathComponent("api/health")
+        let health = AppConfig.proxyBaseURL.appendingPathComponent("api/health")
         do {
             let (data, response) = try await URLSession.shared.data(from: health)
             guard let http = response as? HTTPURLResponse else {
@@ -188,51 +141,10 @@ struct SettingsView: View {
                    obj["ok"] as? Bool == true {
                     probeStatus = .success("代理在线")
                 } else {
-                    probeStatus = .failure("响应格式不对（健康检查未返回 ok:true）")
+                    probeStatus = .failure("响应格式异常")
                 }
             } else {
                 probeStatus = .failure("代理返回 \(http.statusCode)")
-            }
-        } catch {
-            probeStatus = .failure(error.localizedDescription)
-        }
-    }
-
-    /// For direct mode, use /v1/messages/count_tokens — free, returns
-    /// quickly, validates the key. Sends a 1-token "hi" message so we
-    /// don't burn any output tokens.
-    private func probeDirectKey() async {
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages/count_tokens") else {
-            probeStatus = .failure("Anthropic URL 不可用")
-            return
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(apiKey,             forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01",       forHTTPHeaderField: "anthropic-version")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "model":    "claude-sonnet-4-6",
-            "messages": [["role": "user", "content": "hi"]],
-        ])
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse else {
-                probeStatus = .failure("无效响应")
-                return
-            }
-            switch http.statusCode {
-            case 200:
-                probeStatus = .success("Key 有效")
-            case 401:
-                probeStatus = .failure("Key 无效或已撤销")
-            case 429:
-                probeStatus = .failure("Anthropic rate limit — 稍后重试")
-            default:
-                let body = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
-                let msg = ((body?["error"] as? [String: Any])?["message"] as? String) ?? "HTTP \(http.statusCode)"
-                probeStatus = .failure(msg)
             }
         } catch {
             probeStatus = .failure(error.localizedDescription)

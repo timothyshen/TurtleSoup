@@ -11,7 +11,7 @@ struct SidebarView: View {
     @Bindable var recordStore: GameRecordStore
     var publicStore: PublicPuzzleStore
     var onNew: () -> Void
-    @AppStorage("claude_api_key") private var apiKey = ""
+    @Environment(AuthService.self) private var authService
     @State private var searchText = ""
     @State private var difficultyFilter: Puzzle.Difficulty? = nil
 
@@ -111,22 +111,24 @@ struct SidebarView: View {
 
     // MARK: - Footer
 
+    /// Account status indicator. Replaces the old "API Key 已配置 / 未配置"
+    /// footer — that distinction no longer exists since the proxy is
+    /// hardcoded. Now the only thing the user can do wrong is forget to
+    /// log in.
     private var apiKeyFooter: some View {
         HStack(spacing: 6) {
             Circle()
                 .frame(width: 7, height: 7)
-                .foregroundStyle(apiKey.isEmpty ? .red : .green)
-            Text(apiKey.isEmpty ? "未配置 API Key" : "API Key 已配置")
+                .foregroundStyle(authService.isSignedIn ? .green : .red)
+            Text(authService.isSignedIn ? "已登录 \(authService.displayName)" : "未登录")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
-            if apiKey.isEmpty {
-                // SettingsLink is the macOS 14+ way to open the Settings
-                // scene. The old NSApp.sendAction(showSettingsWindow:)
-                // hack now triggers a runtime warning telling you to
-                // switch to this.
+            if !authService.isSignedIn {
                 SettingsLink {
-                    Text("前往设置")
+                    Text("登录")
                         .font(.caption)
                 }
                 .buttonStyle(.link)
