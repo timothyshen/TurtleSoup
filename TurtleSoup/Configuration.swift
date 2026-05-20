@@ -14,9 +14,5 @@ enum AppConfig {
 
     /// Vercel deployment of the haiguitang proxy. All Claude API calls go
     /// through here; we never let users supply their own Anthropic key.
-    ///
-    /// ⚠️ Replace this placeholder with the real URL once the proxy is
-    /// deployed (B5). Until then the app can authenticate but every AI
-    /// call (gameplay verdicts, puzzle generation, review) will fail.
-    static let proxyBaseURL = URL(string: "https://CHANGE-ME.vercel.app")!
+    static let proxyBaseURL = URL(string: "https://haiguitang-coral.vercel.app")!
 }
