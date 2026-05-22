@@ -87,8 +87,13 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        #if os(macOS)
+        // macOS Settings scene needs an explicit window size — the scene
+        // doesn't size to fit its content. iOS gets full sheet width
+        // automatically.
         .frame(width: 420)
         .padding()
+        #endif
     }
 
     // MARK: - Connectivity probe

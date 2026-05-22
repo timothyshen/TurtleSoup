@@ -14,6 +14,9 @@ struct SidebarView: View {
     @Environment(AuthService.self) private var authService
     @State private var searchText = ""
     @State private var difficultyFilter: Puzzle.Difficulty? = nil
+    // iOS-only: ⌘, doesn't exist on iPhone, so settings must be a sheet.
+    // On macOS this stays false — SettingsLink opens the Settings scene.
+    @State private var showSettingsSheet = false
 
     private var puzzles: [Puzzle] { Puzzle.builtIn + store.puzzles }
 
@@ -29,26 +32,52 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tab 切换
-            Picker("", selection: $sidebarTab) {
-                Text("题库").tag(SidebarTab.library)
-                Text("出题").tag(SidebarTab.create)
-                Text("广场").tag(SidebarTab.square)
-                Text("历史").tag(SidebarTab.history)
+            // iOS: render the app title inline at the top of the sidebar.
+            // We hide the system nav bar entirely below (.toolbar hidden)
+            // because NavigationSplitView in compact mode ignores our
+            // navigationBarTitleDisplayMode override and renders the title
+            // in giant Large Title mode regardless, eating ~140pt.
+            //
+            // We use the SF Symbol "tortoise.fill" rather than the 🐢 emoji
+            // here because the iOS Simulator ships with an incomplete
+            // Apple Color Emoji font and renders 🐢 (U+1F422) as a .notdef
+            // box. SF Symbols are bundled in the system and always
+            // resolve. On real iPhone hardware the emoji works fine, but
+            // the symbol is also stylistically tighter at title sizes.
+            #if os(iOS)
+            HStack(spacing: 6) {
+                Image(systemName: "tortoise.fill")
+                    .foregroundStyle(.green)
+                Text("海龟汤")
+                    .font(.title3.weight(.semibold))
+                Spacer()
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.bar)
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+            #endif
 
-            Divider()
+            // Tab 切换 — 5 个 tab 用 segmented picker 在 240pt sidebar 里
+            // 每段只剩 ~40pt，文字被挤扁。改成自建 icon + 文字 stack 的 button
+            // 行，每个 tab 等宽、上下两层（icon 一层、文字一层），即使 5 个也
+            // 不挤；macOS 14+ / iOS 17+ 通用，无需 #if。
+            tabBar
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
 
             if sidebarTab == .library {
+                // 搜索框 — 自建而非 .searchable(placement:.sidebar)。后者在我们
+                // 这个自定义 VStack 头部里光标和 placeholder 会差几个像素，看着
+                // 别扭。TextField + 放大镜图标手动拼，对齐就在自己手里。
+                searchField
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+
                 // 过滤栏
                 filterBar
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(.bar)
+                    .padding(.bottom, 8)
 
                 Divider()
 
@@ -57,8 +86,17 @@ struct SidebarView: View {
                     PuzzleRow(puzzle: puzzle)
                         .tag(puzzle)
                 }
+                // .sidebar style on iPhone wraps rows in chunky inset
+                // groups and adds noticeable padding around the list,
+                // leaving a slab of empty space below short lists. .plain
+                // packs rows edge-to-edge with the surrounding chrome.
+                // macOS keeps .sidebar — that's where the style was
+                // designed to live.
+                #if os(macOS)
                 .listStyle(.sidebar)
-                .searchable(text: $searchText, placement: .sidebar, prompt: "搜索谜题")
+                #else
+                .listStyle(.plain)
+                #endif
                 // Auto-collapse on select was removed: it conflicted with
                 // macOS's native NavigationSplitView sidebar toggle. The
                 // user clicking the top-left chevron to re-show the sidebar
@@ -73,12 +111,15 @@ struct SidebarView: View {
                     recordStore: recordStore,
                     selectedRecord: $selectedHistoryRecord
                 )
-            } else {
+            } else if sidebarTab == .square {
                 PublicSquareView(
                     publicStore: publicStore,
                     selectedPuzzle: $selectedPuzzle,
                     columnVisibility: $columnVisibility
                 )
+            } else {
+                // .room — multiplayer entry
+                RoomSidebarView()
             }
 
             Divider()
@@ -89,7 +130,101 @@ struct SidebarView: View {
                 .padding(.vertical, 10)
         }
         .navigationTitle("🐢 海龟汤")
+        #if os(macOS)
         .frame(minWidth: 240)
+        #else
+        // iOS: completely hide the system nav bar on this root. We render
+        // our own inline title at the top of the VStack above (see the
+        // HStack with "🐢 海龟汤"). Without this, NavigationSplitView in
+        // compact mode shows a Large Title bar despite our display-mode
+        // override.
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
+        #if os(iOS)
+        .sheet(isPresented: $showSettingsSheet) {
+            NavigationStack {
+                SettingsView(authService: authService)
+                    .navigationTitle("设置")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showSettingsSheet = false }
+                        }
+                    }
+            }
+        }
+        #endif
+    }
+
+    // MARK: - Tab bar
+
+    /// All 5 sidebar tabs in a single typed list — keeps the bar's
+    /// rendering trivial and means adding a 6th tab is a 1-line change.
+    private static let tabs: [(SidebarTab, String, String)] = [
+        (.library, "题库", "books.vertical"),
+        (.create,  "出题", "square.and.pencil"),
+        (.square,  "广场", "globe.asia.australia"),
+        (.history, "历史", "clock.arrow.circlepath"),
+        (.room,    "联机", "person.3"),
+    ]
+
+    private var tabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.tabs, id: \.0) { (tab, label, icon) in
+                Button {
+                    sidebarTab = tab
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .medium))
+                        Text(label)
+                            .font(.system(size: 10, weight: .medium))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(
+                        // Selection chip — subtle accent tint behind active
+                        // tab, no border so neighboring tabs don't fight
+                        // for visual weight.
+                        sidebarTab == tab
+                            ? Color.accentColor.opacity(0.18)
+                            : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .foregroundStyle(sidebarTab == tab ? Color.accentColor : .secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Search field
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField("搜索谜题", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Filter bar
@@ -126,13 +261,40 @@ struct SidebarView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer()
-            if !authService.isSignedIn {
-                SettingsLink {
-                    Text("登录")
+            // Always offer a settings entry. Pre-P-something it only
+            // appeared when signed-out (label "登录"), which meant a
+            // logged-in user had no in-app way to sign out other than
+            // ⌘,. Now: signed-out shows "登录" (sends to settings);
+            // signed-in shows a gear icon (also sends to settings,
+            // where the "退出登录" button lives).
+            #if os(macOS)
+            // SettingsLink: macOS 14+ official way to open the Settings
+            // scene from arbitrary UI. Avoids the deprecated NSApp
+            // sendAction(showSettingsWindow:) nag.
+            SettingsLink {
+                if authService.isSignedIn {
+                    Image(systemName: "gearshape")
                         .font(.caption)
+                } else {
+                    Text("登录").font(.caption)
                 }
-                .buttonStyle(.link)
             }
+            .buttonStyle(.link)
+            #else
+            // iOS: no Settings scene — pop a sheet instead.
+            Button {
+                showSettingsSheet = true
+            } label: {
+                if authService.isSignedIn {
+                    Image(systemName: "gearshape")
+                        .font(.caption)
+                } else {
+                    Text("登录").font(.caption)
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            #endif
         }
     }
 }
@@ -163,7 +325,11 @@ struct MyPuzzlesSidebarView: View {
                     PuzzleRow(puzzle: puzzle)
                         .tag(puzzle)
                 }
+                #if os(macOS)
                 .listStyle(.sidebar)
+                #else
+                .listStyle(.plain)
+                #endif
             }
         }
         .toolbar {

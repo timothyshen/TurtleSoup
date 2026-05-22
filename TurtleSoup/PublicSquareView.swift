@@ -30,7 +30,11 @@ struct PublicSquareView: View {
                     PuzzleRow(puzzle: puzzle)
                         .tag(puzzle)
                 }
+                #if os(macOS)
                 .listStyle(.sidebar)
+                #else
+                .listStyle(.plain)
+                #endif
                 // Auto-collapse removed for the same reason as the library
                 // sidebar — see SidebarView.swift. macOS users can collapse
                 // the sidebar themselves via ⌘0 or the toolbar toggle.

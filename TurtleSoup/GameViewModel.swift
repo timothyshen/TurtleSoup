@@ -199,7 +199,11 @@ final class GameViewModel {
     /// to spin up its own Task.
     func startReviewGeneration(config: ReviewService.Config) {
         // Don't double-start; the in-flight task will populate everything.
-        guard aiReview == nil, !isGeneratingReview else { return }
+        guard aiReview == nil, !isGeneratingReview else {
+            print("⚠️ [Review] startReviewGeneration bailed: aiReview=\(aiReview != nil ? "set" : "nil") isGenerating=\(isGeneratingReview)")
+            return
+        }
+        print("▶️ [Review] startReviewGeneration kicking off task")
         reviewTask = Task { [weak self] in
             await self?.generateReview(config: config)
         }
@@ -226,12 +230,17 @@ final class GameViewModel {
     /// Prefer `startReviewGeneration(config:)` from UI code — it owns the
     /// cancel-able Task handle and shields callers from threading details.
     func generateReview(config: ReviewService.Config) async {
-        guard aiReview == nil, !isGeneratingReview else { return }
+        guard aiReview == nil, !isGeneratingReview else {
+            print("⚠️ [Review] generateReview bailed: aiReview=\(aiReview != nil ? "set" : "nil") isGenerating=\(isGeneratingReview)")
+            return
+        }
         guard let recordID = lastSavedRecordID else {
             // Should only happen if called before persistRecord — bail quietly.
+            print("⚠️ [Review] generateReview bailed: lastSavedRecordID is nil (game not persisted yet)")
             return
         }
 
+        print("▶️ [Review] starting stream for puzzle=\(puzzle.title) won=\(isGameWon) questions=\(questionCount)")
         isGeneratingReview = true
         reviewError = nil
         reviewProgress = []
@@ -248,22 +257,28 @@ final class GameViewModel {
                 isWon: isGameWon,
                 questionCount: questionCount
             )
+            print("📡 [Review] stream opened, waiting for events…")
             for try await event in stream {
                 try Task.checkCancellation()
                 switch event {
                 case .progress(let field, let value):
+                    print("📨 [Review] progress field=\(field) value.len=\(value.count)")
                     if !reviewProgress.contains(where: { $0.field == field }) {
                         reviewProgress.append((field: field, value: value))
                     }
                 case .complete(let review):
+                    print("✅ [Review] complete: summary=\(review.summary.prefix(40))… moments=\(review.keyMoments.count)")
                     recordStore.updateAIReview(recordID: recordID, review: review)
                     aiReview = review
                 }
             }
+            print("🏁 [Review] stream finished")
         } catch is CancellationError {
             // Expected on user-initiated cancel; cancelReviewGeneration
             // already reset the UI state. Don't surface as an error.
+            print("🚫 [Review] cancelled")
         } catch {
+            print("❌ [Review] error: \(error.localizedDescription)")
             reviewError = error.localizedDescription
         }
     }

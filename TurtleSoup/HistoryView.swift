@@ -26,8 +26,17 @@ struct HistorySidebarList: View {
                 List(filtered, selection: $selectedRecord) { record in
                     HistoryRow(record: record).tag(record)
                 }
+                #if os(macOS)
                 .listStyle(.sidebar)
                 .searchable(text: $searchText, placement: .sidebar, prompt: "搜索标题")
+                #else
+                // .sidebar style + placement are macOS-only. On iPhone
+                // .plain packs rows tighter and .automatic puts the
+                // searchable bar under the inline title where users
+                // expect.
+                .listStyle(.plain)
+                .searchable(text: $searchText, placement: .automatic, prompt: "搜索标题")
+                #endif
             }
         }
         .task(id: recordStore.savedRecordCount) {
@@ -126,6 +135,7 @@ struct HistoryOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("历史")
+        .inlineNavTitleOnIOS()
         .task(id: recordStore.savedRecordCount) {
             records = recordStore.allRecords()
         }
@@ -253,6 +263,54 @@ struct HistoryOverviewView: View {
 struct HistoryDetailView: View {
 
     let record: GameRecord
+    /// Proxy config for on-demand review generation. nil → no signed-in
+    /// proxy access, so the "生成 AI 复盘" affordance is hidden.
+    var reviewConfig: ReviewService.Config? = nil
+    /// Persists generated reviews back onto the record (CoreData + Firestore).
+    /// nil makes generation read-only — keeps the previews / tests from
+    /// needing a full store.
+    var recordStore: GameRecordStore? = nil
+    /// Source of custom puzzles (user-authored). We resolve `record.puzzleID`
+    /// against builtIn + this to find the original puzzle (with the answer
+    /// the AI needs to write a useful review). nil hides generation too.
+    var puzzleStore: PuzzleStore? = nil
+
+    // MARK: - Generation state
+    //
+    // Local to this view — a generation kicked off here doesn't bleed into
+    // the next selected record. liveReview is preferred over record.aiReview
+    // for display so a freshly-finished review shows up immediately without
+    // waiting for the parent list to re-fetch.
+
+    @State private var liveReview: GameReview? = nil
+    @State private var isGenerating = false
+    @State private var generationError: String? = nil
+    @State private var reviewProgress: [(field: String, value: String)] = []
+    @State private var generationTask: Task<Void, Never>? = nil
+
+    /// Resolves the original Puzzle (including its secret 汤底) from the
+    /// known sources. We can only generate a review when this returns
+    /// non-nil — without the answer the AI prompt is missing essential
+    /// context. Public-square puzzles aren't checked here; if a user
+    /// played one and wants a review later, the publicStore would need a
+    /// fetch path. Out of scope for v1 of this feature.
+    private var resolvedPuzzle: Puzzle? {
+        if let p = Puzzle.builtIn.first(where: { $0.id == record.puzzleID }) { return p }
+        if let p = puzzleStore?.puzzles.first(where: { $0.id == record.puzzleID }) { return p }
+        return nil
+    }
+
+    /// What the UI shows. live (just-generated) wins over the persisted
+    /// review so the latest streamed output appears without waiting on a
+    /// parent re-fetch.
+    private var displayedReview: GameReview? { liveReview ?? record.aiReview }
+
+    /// True iff we have everything needed to kick off generation: a proxy
+    /// config, a record store to write back to, AND a Puzzle with the
+    /// answer.
+    private var canGenerate: Bool {
+        reviewConfig != nil && recordStore != nil && resolvedPuzzle != nil
+    }
 
     var body: some View {
         ScrollView {
@@ -260,19 +318,37 @@ struct HistoryDetailView: View {
                 header
                 Divider()
                 transcriptSection
-                if let review = record.aiReview {
-                    Divider()
-                    reviewSection(review)
-                } else if !record.isWon {
-                    Divider()
-                    noReviewNotice
-                }
+                Divider()
+                reviewArea
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(record.puzzleTitle)
+        .inlineNavTitleOnIOS()
+        #if os(macOS)
         .navigationSubtitle(headerSubtitle)
+        #endif
+        .onDisappear { generationTask?.cancel() }
+    }
+
+    /// One of: rendered review, in-flight progress, retryable error, or a
+    /// "generate" button. Mirrors the priority order in GameView's
+    /// reviewSection so behavior stays consistent between in-game and
+    /// post-hoc review surfaces.
+    @ViewBuilder
+    private var reviewArea: some View {
+        if let review = displayedReview {
+            reviewSection(review)
+        } else if isGenerating {
+            generationProgress
+        } else if let err = generationError {
+            generationErrorBox(err)
+        } else if canGenerate {
+            generateButton
+        } else {
+            noReviewNotice
+        }
     }
 
     // MARK: - Sections
@@ -363,10 +439,14 @@ struct HistoryDetailView: View {
         }
     }
 
+    /// Shown when generation isn't possible — e.g. puzzle no longer in the
+    /// local library (deleted, or originally a public-square one we can't
+    /// re-resolve), or the user isn't signed in. Doesn't gate on isWon —
+    /// give-up records benefit from a review just as much as wins.
     private var noReviewNotice: some View {
         HStack(spacing: 8) {
             Image(systemName: "info.circle").foregroundStyle(.secondary)
-            Text("这局未生成 AI 复盘。")
+            Text(noReviewReason)
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -374,6 +454,150 @@ struct HistoryDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var noReviewReason: String {
+        if reviewConfig == nil {
+            return "登录后可补生成 AI 复盘。"
+        }
+        if resolvedPuzzle == nil {
+            return "原题已不在本地题库，无法生成复盘。"
+        }
+        return "这局未生成 AI 复盘。"
+    }
+
+    // MARK: - Generation UI
+
+    private var generateButton: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("AI 复盘", systemImage: "sparkles").font(.headline)
+            Button {
+                startGeneration()
+            } label: {
+                Label("生成 AI 复盘", systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var generationProgress: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("正在复盘…")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+                Spacer()
+                Button("取消", role: .cancel) { cancelGeneration() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+            // Streamed fields as they land. Same field set the proxy emits
+            // (summary, tip); key_moments arrives only in the complete
+            // event so it isn't a progress row here.
+            ForEach(reviewProgress, id: \.field) { entry in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(progressFieldLabel(entry.field))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(entry.value)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    private func generationErrorBox(_ err: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("AI 复盘", systemImage: "sparkles").font(.headline)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(err)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(Color.red.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Button {
+                generationError = nil
+                startGeneration()
+            } label: {
+                Label("重试", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    private func progressFieldLabel(_ field: String) -> String {
+        switch field {
+        case "summary": return "总结"
+        case "tip":     return "下次试试"
+        default:        return field
+        }
+    }
+
+    // MARK: - Generation actions
+
+    private func startGeneration() {
+        guard !isGenerating else { return }
+        guard let cfg = reviewConfig,
+              let store = recordStore,
+              let puzzle = resolvedPuzzle else { return }
+
+        isGenerating = true
+        generationError = nil
+        reviewProgress = []
+
+        generationTask = Task { @MainActor in
+            defer {
+                isGenerating = false
+                generationTask = nil
+            }
+            do {
+                let service = ReviewService(config: cfg)
+                let stream = await service.generateStream(
+                    puzzle: puzzle,
+                    messages: record.messages.filter { $0.role != .system },
+                    isWon: record.isWon,
+                    questionCount: record.questionCount
+                )
+                for try await event in stream {
+                    try Task.checkCancellation()
+                    switch event {
+                    case .progress(let field, let value):
+                        if !reviewProgress.contains(where: { $0.field == field }) {
+                            reviewProgress.append((field: field, value: value))
+                        }
+                    case .complete(let review):
+                        // Persist + locally surface. updateAIReview writes
+                        // CoreData and pushes to Firestore in one shot, so
+                        // a re-sync on another device will see it too.
+                        store.updateAIReview(recordID: record.id, review: review)
+                        liveReview = review
+                    }
+                }
+            } catch is CancellationError {
+                // User-initiated; no error display.
+            } catch {
+                generationError = error.localizedDescription
+            }
+        }
+    }
+
+    private func cancelGeneration() {
+        generationTask?.cancel()
+        generationTask = nil
+        isGenerating = false
+        reviewProgress = []
     }
 
     // MARK: - Moment badge (duplicated from GameView; small enough not to extract)

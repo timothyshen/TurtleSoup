@@ -171,6 +171,7 @@ struct PuzzleEditorView: View {
             .padding(24)
         }
         .navigationTitle(isEditMode ? "编辑题目" : "新建题目")
+        .inlineNavTitleOnIOS()
         .onAppear { loadPuzzle(editingPuzzle) }
         .onChange(of: editingPuzzle) { loadPuzzle(editingPuzzle) }
         .sheet(isPresented: $showAISheet) {

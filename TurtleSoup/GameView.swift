@@ -11,6 +11,19 @@ struct GameView: View {
 
     @FocusState private var inputFocused: Bool
 
+    // iOS-only size-class adapter. macOS doesn't expose horizontalSizeClass
+    // (it doesn't have the concept — windows can be any width but there's
+    // no "compact" classification). On iPad we're always .regular and use
+    // the two-column layout same as macOS. On iPhone (.compact) we fold
+    // the info pane behind a toolbar button → sheet.
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSize
+    @State private var showInfoSheet = false
+    private var isCompact: Bool { hSize == .compact }
+    #else
+    private var isCompact: Bool { false }
+    #endif
+
     init(puzzle: Puzzle, claudeConfig: ClaudeService.Config, recordStore: GameRecordStore, reviewConfig: ReviewService.Config? = nil, isPublicPuzzle: Bool = false) {
         _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, claudeConfig: claudeConfig, recordStore: recordStore, isPublicPuzzle: isPublicPuzzle))
         _recordStore = State(wrappedValue: recordStore)
@@ -18,37 +31,78 @@ struct GameView: View {
     }
 
     var body: some View {
-        // HStack (not HSplitView): HSplitView is an interactive resizable
-        // splitter that fights NavigationSplitView's sidebar-toggle
-        // animation, causing the toggle to freeze mid-transition. Since
-        // both columns here have fixed/min-width constraints anyway, the
-        // draggable divider added nothing.
-        HStack(spacing: 0) {
-            // 左：对话主区
+        layoutForSizeClass
+            .navigationTitle(vm.puzzle.title)
+            .inlineNavTitleOnIOS()
+            #if os(macOS)
+            // macOS has a dedicated subtitle line below the title. iOS
+            // surfaces the question count in the info sheet instead (and
+            // inline in the regular-class right-hand pane).
+            .navigationSubtitle("\(vm.questionCount) 问")
+            #endif
+            #if os(iOS)
+            .toolbar {
+                if isCompact {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showInfoSheet = true
+                        } label: {
+                            Label("信息", systemImage: "info.circle")
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showInfoSheet) {
+                NavigationStack {
+                    ScrollView { infoPane.padding(.bottom, 12) }
+                        .navigationTitle("汤面 · \(vm.questionCount) 问")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("完成") { showInfoSheet = false }
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+            #endif
+            .sheet(isPresented: $vm.showAnswer) { answerSheet }
+            .alert("请求失败", isPresented: Binding(
+                get: { vm.errorMessage != nil },
+                set: { if !$0 { vm.errorMessage = nil } }
+            )) {
+                Button("好") { vm.errorMessage = nil }
+            } message: {
+                Text(vm.errorMessage ?? "")
+            }
+            .onAppear {
+                inputFocused = true
+                vm.loadPastReview()   // deferred CoreData fetch — see GameViewModel
+            }
+    }
+
+    /// Switches between the macOS / iPad two-column layout and the iPhone
+    /// single-column layout. iPhone hides the info pane behind a toolbar
+    /// button (see `.toolbar` above) and renders just the chat full-width.
+    @ViewBuilder
+    private var layoutForSizeClass: some View {
+        if isCompact {
             chatPane
-                .frame(minWidth: 460, maxWidth: .infinity)
-
-            Divider()
-
-            // 右：汤面 + 控制面板
-            infoPane
-                .frame(width: 260)
-                .background(.regularMaterial)
-        }
-        .navigationTitle(vm.puzzle.title)
-        .navigationSubtitle("\(vm.questionCount) 问")
-        .sheet(isPresented: $vm.showAnswer) { answerSheet }
-        .alert("请求失败", isPresented: Binding(
-            get: { vm.errorMessage != nil },
-            set: { if !$0 { vm.errorMessage = nil } }
-        )) {
-            Button("好") { vm.errorMessage = nil }
-        } message: {
-            Text(vm.errorMessage ?? "")
-        }
-        .onAppear {
-            inputFocused = true
-            vm.loadPastReview()   // deferred CoreData fetch — see GameViewModel
+        } else {
+            // HStack (not HSplitView): HSplitView is an interactive
+            // resizable splitter that fights NavigationSplitView's sidebar-
+            // toggle animation, causing the toggle to freeze mid-transition.
+            // Since both columns here have fixed/min-width constraints
+            // anyway, the draggable divider added nothing.
+            HStack(spacing: 0) {
+                chatPane
+                    .frame(minWidth: 460, maxWidth: .infinity)
+                Divider()
+                infoPane
+                    .frame(width: 260)
+                    .background(.regularMaterial)
+            }
         }
     }
 
@@ -116,7 +170,12 @@ struct GameView: View {
                     }
             }
             .padding(8)
-            .background(Color(nsColor: .textBackgroundColor))
+            // Cross-platform "text editor background" color. NSColor.textBackgroundColor
+            // and UIColor.systemBackground both render as a clean panel surface that
+            // adapts to dark mode; SwiftUI's Color(.textBackgroundColor) only resolves
+            // on macOS. .regularMaterial is the closest cross-platform equivalent —
+            // it's a thin material that picks up the parent's tint cleanly.
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
@@ -279,50 +338,62 @@ struct GameView: View {
     // MARK: - Answer sheet
 
     private var answerSheet: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("真相大白")
-                .font(.title2.weight(.semibold))
+        // Outer ScrollView so the sheet contents — which can grow tall
+        // once an AI review with 3-5 moments + summary + tip + the
+        // existing fixed-height answer block lands — stay reachable on
+        // narrow iPhone screens. The inner answer-text ScrollView is now
+        // redundant (nested scrollers fight each other), so it's been
+        // unwrapped into a plain Text block.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("真相大白")
+                    .font(.title2.weight(.semibold))
 
-            Divider()
+                Divider()
 
-            // 统计
-            HStack(spacing: 32) {
-                answerStat(label: "提问次数", value: "\(vm.questionCount)")
-                answerStat(label: "难度", value: vm.puzzle.difficulty.rawValue)
-                answerStat(label: "出题者", value: vm.puzzle.author)
-            }
+                // 统计
+                HStack(spacing: 32) {
+                    answerStat(label: "提问次数", value: "\(vm.questionCount)")
+                    answerStat(label: "难度", value: vm.puzzle.difficulty.rawValue)
+                    answerStat(label: "出题者", value: vm.puzzle.author)
+                }
 
-            Divider()
+                Divider()
 
-            VStack(alignment: .leading, spacing: 10) {
-                Label("汤底（完整真相）", systemImage: "lightbulb.fill")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("汤底（完整真相）", systemImage: "lightbulb.fill")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
                     Text(vm.puzzle.answer)
                         .font(.body)
                         .lineSpacing(6)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 200)
-            }
 
-            // AI 复盘 section — only available when a proxy is configured.
-            if reviewConfig != nil {
-                Divider()
-                reviewSection
-            }
+                // AI 复盘 section — only available when a proxy is configured.
+                if reviewConfig != nil {
+                    Divider()
+                    reviewSection
+                }
 
-            HStack {
-                Spacer()
-                Button("完成") { vm.showAnswer = false }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                HStack {
+                    Spacer()
+                    Button("完成") { vm.showAnswer = false }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
             }
+            .padding(24)
         }
-        .padding(24)
+        #if os(macOS)
+        // macOS sheets don't size to fit content — give it an explicit
+        // width. iOS gets the system sheet width, with the content
+        // free-flowing inside scrollable bounds.
         .frame(width: 480)
+        #else
+        .frame(maxWidth: .infinity)
+        #endif
     }
 
     // MARK: - AI review

@@ -304,6 +304,23 @@ async function handleStreaming(apiKey: string, userPrompt: string, uid: string):
             for (const event of newlyClosed) {
               controller.enqueue(encoder.encode(sseEvent({ name: "progress", data: event })));
             }
+          } else if (data.type === "error") {
+            // Anthropic mid-stream error (overloaded, rate_limit, etc).
+            // See generate-review.ts for full rationale — without this,
+            // the loop runs to completion without emitting a terminal
+            // event and the client times out.
+            const err = (data as { error?: { type?: string; message?: string } }).error;
+            controller.enqueue(
+              encoder.encode(sseEvent({
+                name: "error",
+                data: {
+                  code: err?.type ?? "upstream_error",
+                  message: err?.message ?? "Anthropic stream emitted error event",
+                },
+              })),
+            );
+            controller.close();
+            return;
           } else if (data.type === "message_delta") {
             // Anthropic surfaces refusals here, well before message_stop.
             // Distinct from a parse error — the model deliberately stopped.
@@ -348,7 +365,25 @@ async function handleStreaming(apiKey: string, userPrompt: string, uid: string):
             return;
           }
         }
-        // Stream ended without a message_stop — best-effort close.
+        // Stream ended without a message_stop. Try to salvage from the
+        // accumulated detector buffer; otherwise emit a diagnostic error
+        // so the client doesn't see "Stream ended without complete event".
+        try {
+          const puzzle = JSON.parse(detector.full()) as Record<string, unknown>;
+          controller.enqueue(
+            encoder.encode(sseEvent({ name: "complete", data: { puzzle } })),
+          );
+        } catch {
+          controller.enqueue(
+            encoder.encode(sseEvent({
+              name: "error",
+              data: {
+                code: "stream_truncated",
+                message: "Upstream stream ended before message_stop. The function may have hit the platform's execution limit, or Anthropic closed the connection.",
+              },
+            })),
+          );
+        }
         controller.close();
       } catch (e) {
         controller.enqueue(

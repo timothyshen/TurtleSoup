@@ -167,7 +167,10 @@ export default async function handler(req: Request): Promise<Response> {
         // medium effort: needs to read a transcript carefully and pick out
         // moments — more thoughtful than gameplay verdicts, but no need to
         // burn full reasoning.
-        output_config: { effort: "medium" },
+        // effort=low: review is a summarization task over already-known
+        // content, doesn't benefit from deep reasoning. Lower effort cuts
+        // wall-clock by ~half, important on Vercel Hobby's 30s Edge cap.
+        output_config: { effort: "low" },
         tools: [SUBMIT_TOOL],
         tool_choice: { type: "tool", name: "submit_review" },
         messages: [{ role: "user", content: userPrompt }],
@@ -218,7 +221,10 @@ async function handleStreaming(apiKey: string, userPrompt: string, uid: string):
           { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
         ],
         thinking: { type: "disabled" },
-        output_config: { effort: "medium" },
+        // effort=low: review is a summarization task over already-known
+        // content, doesn't benefit from deep reasoning. Lower effort cuts
+        // wall-clock by ~half, important on Vercel Hobby's 30s Edge cap.
+        output_config: { effort: "low" },
         tools: [SUBMIT_TOOL],
         tool_choice: { type: "tool", name: "submit_review" },
         stream: true,
@@ -259,6 +265,24 @@ async function handleStreaming(apiKey: string, userPrompt: string, uid: string):
             for (const event of newlyClosed) {
               controller.enqueue(encoder.encode(sseEvent({ name: "progress", data: event })));
             }
+          } else if (data.type === "error") {
+            // Anthropic mid-stream error (overloaded, rate_limit, etc).
+            // Without this branch the loop would just keep iterating
+            // until upstream closes, and we'd never emit a terminal
+            // event — the client times out with "Stream ended without
+            // complete event".
+            const err = (data as { error?: { type?: string; message?: string } }).error;
+            controller.enqueue(
+              encoder.encode(sseEvent({
+                name: "error",
+                data: {
+                  code: err?.type ?? "upstream_error",
+                  message: err?.message ?? "Anthropic stream emitted error event",
+                },
+              })),
+            );
+            controller.close();
+            return;
           } else if (data.type === "message_delta") {
             // Refusal short-circuit (see generate-puzzle.ts for the rationale).
             const md = (parsed.data as {
@@ -298,6 +322,27 @@ async function handleStreaming(apiKey: string, userPrompt: string, uid: string):
             controller.close();
             return;
           }
+        }
+        // Upstream closed naturally without sending message_stop. Usually
+        // this is a truncation (Vercel function timeout, network hiccup,
+        // upstream forcibly disconnected). Try to salvage: if detector
+        // has a parseable JSON, emit it as complete; otherwise emit a
+        // diagnostic error so the client surfaces something actionable.
+        try {
+          const review = JSON.parse(detector.full()) as Record<string, unknown>;
+          controller.enqueue(
+            encoder.encode(sseEvent({ name: "complete", data: { review } })),
+          );
+        } catch {
+          controller.enqueue(
+            encoder.encode(sseEvent({
+              name: "error",
+              data: {
+                code: "stream_truncated",
+                message: "Upstream stream ended before message_stop. The function may have hit the platform's execution limit, or Anthropic closed the connection.",
+              },
+            })),
+          );
         }
         controller.close();
       } catch (e) {

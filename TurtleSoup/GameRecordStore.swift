@@ -2,7 +2,14 @@ import CoreData
 import Observation
 
 /// Snapshot of one complete game session, used for persistence.
-struct GameRecord: Identifiable, Hashable {
+///
+/// `nonisolated` because this is a plain Sendable value type — all fields
+/// are value types or Sendable Codable structs. The project's
+/// `-default-isolation=MainActor` flag would otherwise mark its memberwise
+/// init as @MainActor-isolated, breaking calls from nonisolated contexts
+/// like FirestoreService.fetchRecords (which builds GameRecord in a
+/// background async task).
+nonisolated struct GameRecord: Identifiable, Hashable {
 
     static func == (lhs: GameRecord, rhs: GameRecord) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -51,6 +58,57 @@ final class GameRecordStore {
     init(pc: PersistenceController = .shared, firestore: any FirestoreServicing = FirestoreService()) {
         self.pc = pc
         self.firestore = firestore
+        // One-shot dedup pass on launch. Cleans up the legacy duplicates
+        // caused by the puzzleID+startedAt dedup predicate missing on
+        // Firestore round-trip (Timestamp→Date sub-ms precision loss).
+        // Idempotent — re-runs on every launch are cheap since the second
+        // pass finds nothing to delete.
+        deduplicateExistingRecords()
+    }
+
+    /// Walk every GameRecordEntity row, group by `id`, keep the first,
+    /// delete the rest. Then group by `(puzzleID, startedAt-to-millisecond)`,
+    /// same deal — catches the legacy case where two rows share metadata
+    /// but have different ids (each came from a separate save).
+    ///
+    /// Runs synchronously in init since the dataset is small (typical user
+    /// has < 100 game records) and we want the UI's first read of
+    /// allRecords() to see the cleaned state.
+    private func deduplicateExistingRecords() {
+        let ctx = pc.ctx
+        let req = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
+        guard let rows = try? ctx.fetch(req), !rows.isEmpty else { return }
+
+        var seenIDs = Set<UUID>()
+        var seenKeys = Set<String>()    // "puzzleID|epochSeconds"
+        var toDelete: [NSManagedObject] = []
+
+        for row in rows {
+            // ID dedup
+            if let id = row.value(forKey: "id") as? UUID {
+                if seenIDs.contains(id) {
+                    toDelete.append(row)
+                    continue
+                }
+                seenIDs.insert(id)
+            }
+            // Metadata dedup (legacy rows that lacked id-based dedup at
+            // save time). Round timestamp to seconds to absorb the
+            // sub-millisecond drift that caused the original bug.
+            if let pid = row.value(forKey: "puzzleID") as? UUID,
+               let started = row.value(forKey: "startedAt") as? Date {
+                let key = "\(pid.uuidString)|\(Int(started.timeIntervalSince1970))"
+                if seenKeys.contains(key) {
+                    toDelete.append(row)
+                    continue
+                }
+                seenKeys.insert(key)
+            }
+        }
+
+        if toDelete.isEmpty { return }
+        for row in toDelete { ctx.delete(row) }
+        pc.save()
     }
 
     // MARK: - Write
@@ -58,15 +116,27 @@ final class GameRecordStore {
     func saveRecord(_ record: GameRecord) {
         let ctx = pc.ctx
 
-        // Dedup: skip if same puzzleID + startedAt already exists.
-        // On hit, backfill aiReview from the remote/incoming record if the
-        // existing row doesn't have one — fixes the sync case where the
-        // record was created locally, then the player generated a review on
-        // another device, and we're now pulling it back.
+        // Dedup: primary key is `record.id` (UUID). Previously this used
+        // `puzzleID + startedAt`, which broke on cross-device sync —
+        // Firestore Timestamp→Date round-trip drops sub-millisecond
+        // precision, so the local `startedAt` and the synced-back one
+        // don't compare equal, and the same record got written twice.
+        // record.id is preserved verbatim through Firestore (the doc ID
+        // == record.id.uuidString), so id-based dedup is bulletproof.
+        //
+        // Fallback: also check puzzleID + startedAt for legacy records
+        // written before id dedup existed (those exist but rare; they'd
+        // never get backfilled otherwise).
+        //
+        // On hit, backfill aiReview from the incoming record if the
+        // existing row doesn't have one, and backfill transcript too.
         let dup = NSFetchRequest<NSManagedObject>(entityName: "GameRecordEntity")
-        dup.predicate = NSPredicate(format: "puzzleID == %@ AND startedAt == %@",
-                                    record.puzzleID as CVarArg,
-                                    record.startedAt as NSDate)
+        dup.predicate = NSPredicate(
+            format: "id == %@ OR (puzzleID == %@ AND startedAt == %@)",
+            record.id as CVarArg,
+            record.puzzleID as CVarArg,
+            record.startedAt as NSDate
+        )
         dup.fetchLimit = 1
         if let existing = try? ctx.fetch(dup), let existingObj = existing.first {
             var didUpdate = false

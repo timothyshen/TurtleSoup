@@ -51,7 +51,9 @@ struct AIPuzzleGeneratorSheet: View {
             footer
         }
         .padding(24)
+        #if os(macOS)
         .frame(width: 560, height: 540)
+        #endif
         .onDisappear { cancelStream() }
     }
 
