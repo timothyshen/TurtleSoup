@@ -42,10 +42,13 @@ struct SettingsView: View {
                 } else {
                     TextField("邮箱", text: $email)
                         .textContentType(.emailAddress)
+                        #if os(iOS)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
                     SecureField("密码", text: $password)
                         .textContentType(isSignUp ? .newPassword : .password)
-
-                    Toggle("注册新账号", isOn: $isSignUp)
 
                     if let err = errorMessage {
                         Text(err)
@@ -53,28 +56,63 @@ struct SettingsView: View {
                             .font(.caption)
                     }
 
-                    HStack {
-                        Button(isSignUp ? "注册" : "登录") {
-                            Task { await handleEmailAuth() }
-                        }
-                        .disabled(isLoading || email.isEmpty || password.isEmpty)
-
-                        Spacer()
-
-                        SignInWithAppleButton(
-                            isSignUp ? .signUp : .signIn,
-                            onRequest: { request in
-                                let appleRequest = authService.startAppleSignIn()
-                                request.requestedScopes = appleRequest.requestedScopes ?? []
-                                request.nonce = appleRequest.nonce
-                            },
-                            onCompletion: { result in
-                                Task { try? await authService.handleAppleSignIn(result: result) }
+                    // Primary action — switches between 登录 and 注册 based
+                    // on which mode the user picked via the link below.
+                    // Replaces the old Toggle("注册新账号") UX which made
+                    // "register" feel like an obscure setting; now it's a
+                    // proper two-screen flow with one prominent CTA.
+                    Button {
+                        Task { await handleEmailAuth() }
+                    } label: {
+                        if isLoading {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text(isSignUp ? "注册中…" : "登录中…")
                             }
-                        )
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(width: 160, height: 32)
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Text(isSignUp ? "注册" : "登录")
+                                .frame(maxWidth: .infinity)
+                                .fontWeight(.semibold)
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isLoading || email.isEmpty || password.isEmpty)
+
+                    // Mode switch — text link below, NOT a toggle. Tapping
+                    // it flips the form between login and signup states.
+                    HStack {
+                        Spacer()
+                        Button {
+                            isSignUp.toggle()
+                            errorMessage = nil
+                        } label: {
+                            Text(isSignUp ? "已有账号？登录" : "还没有账号？注册")
+                                .font(.footnote)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                        Spacer()
+                    }
+
+                    // Sign in with Apple — alternate path. Kept compact
+                    // below the email flow rather than competing for
+                    // visual weight beside it.
+                    SignInWithAppleButton(
+                        isSignUp ? .signUp : .signIn,
+                        onRequest: { request in
+                            let appleRequest = authService.startAppleSignIn()
+                            request.requestedScopes = appleRequest.requestedScopes ?? []
+                            request.nonce = appleRequest.nonce
+                        },
+                        onCompletion: { result in
+                            Task { try? await authService.handleAppleSignIn(result: result) }
+                        }
+                    )
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 44)
+                    .frame(maxWidth: .infinity)
                 }
             }
 
