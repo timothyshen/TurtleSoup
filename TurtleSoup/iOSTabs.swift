@@ -124,6 +124,12 @@ struct LibraryTab: View {
                         PuzzleRow(puzzle: puzzle).tag(puzzle)
                     }
                     .listStyle(.plain)
+                    // Hard scroll edge mask: crisp cutoff between TabHeader/
+                    // filter chips above and the scrolling list. Without it
+                    // the iOS 26 default leaves a soft gradient that can
+                    // look muddy when rows scroll under the fixed chrome.
+                    // Bottom mask matches the Liquid Glass tab bar overlap.
+                    .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
                 }
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(item: $selectedPuzzle) { puzzle in
@@ -219,6 +225,7 @@ struct CreateTab: View {
                             PuzzleRow(puzzle: puzzle).tag(puzzle)
                         }
                         .listStyle(.plain)
+                        .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
                     }
                 }
                 .toolbar(.hidden, for: .navigationBar)
@@ -295,6 +302,7 @@ struct SquareTab: View {
                         }
                         .listStyle(.plain)
                         .refreshable { await publicStore.refresh() }
+                        .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
                     }
                 }
                 .toolbar(.hidden, for: .navigationBar)

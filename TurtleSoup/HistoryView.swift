@@ -33,9 +33,11 @@ struct HistorySidebarList: View {
                 // .sidebar style + placement are macOS-only. On iPhone
                 // .plain packs rows tighter and .automatic puts the
                 // searchable bar under the inline title where users
-                // expect.
+                // expect. Hard edge mask crisps the boundary against
+                // the TabHeader above and Liquid Glass tab bar below.
                 .listStyle(.plain)
                 .searchable(text: $searchText, placement: .automatic, prompt: "搜索标题")
+                .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
                 #endif
             }
         }
