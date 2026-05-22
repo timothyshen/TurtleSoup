@@ -34,18 +34,28 @@ struct RoomSidebarView: View {
     @State private var showJoinSheet   = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if let room = roomService.room {
-                inRoomStatus(room)
+                VStack(spacing: 0) {
+                    inRoomStatus(room)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
             } else if !authService.isSignedIn {
+                // No padding/Spacer wrapper here — notSignedInPrompt
+                // fills the whole tab and vertically centers its own
+                // content via its inner Spacers.
                 notSignedInPrompt
             } else {
-                entryButtons
+                VStack(spacing: 0) {
+                    entryButtons
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
         .sheet(isPresented: $showCreateSheet) { CreateRoomSheet() }
         .sheet(isPresented: $showJoinSheet)   { JoinRoomSheet() }
     }
@@ -119,17 +129,22 @@ struct RoomSidebarView: View {
     }
 
     private var notSignedInPrompt: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 14) {
+            Spacer()
             Image(systemName: "person.crop.circle.badge.exclamationmark")
-                .font(.system(size: 32))
+                .font(.system(size: 44))
                 .foregroundStyle(.tertiary)
             Text("登录后才能玩多人房间")
-                .font(.subheadline)
+                .font(.headline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            Text("从右上角头像登录或注册")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 40)
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func roomStatusLabel(_ s: Room.Status) -> String {
