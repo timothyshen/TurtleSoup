@@ -138,6 +138,7 @@ struct LibraryTab: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// Inline search field — replaces `.searchable` since we don't have a
@@ -247,6 +248,7 @@ struct CreateTab: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var emptyState: some View {
@@ -309,6 +311,7 @@ struct SquareTab: View {
                 .task { await publicStore.fetchIfNeeded() }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var emptyState: some View {
@@ -355,6 +358,7 @@ struct HistoryTab: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -388,7 +392,9 @@ struct RoomTab: View {
                 .toolbar(.hidden, for: .navigationBar)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
 #endif  // !os(macOS)
+
