@@ -128,35 +128,18 @@ struct RootView: View {
     // local to that tab — switching tabs doesn't reset the others.
 
     #if !os(macOS)
-    /// Custom layout that bypasses iOS 26's TabView. The system TabView
-    /// in iOS 26 wraps tab content in a rounded "card" with a floating
-    /// Liquid Glass tab bar — that leaves ~25% of black background above
-    /// the content. UITabBar.appearance() doesn't override the new
-    /// presentation, and there's no public knob to opt out. So we just
-    /// hand-roll it: VStack { currentTabContent; bottomTabBar } with full
-    /// control over edges, insets, and shape.
+    /// iOS uses the system TabView. With UILaunchScreen_Generation set in
+    /// the Info.plist (see project.pbxproj), iOS runs us as a modern
+    /// fullscreen app and TabView renders with the iOS 26 Liquid Glass
+    /// floating capsule at the bottom — which is what we want.
+    ///
+    /// Earlier we tried a hand-rolled tab bar to dodge what looked like
+    /// "Liquid Glass eating content space", but that was actually the
+    /// legacy-scaling letterbox (the launch screen key was missing).
+    /// Fixing the launch screen made the Liquid Glass tab bar correct.
     @ViewBuilder
     private var iOSLayout: some View {
-        VStack(spacing: 0) {
-            currentTabContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            customTabBar
-        }
-        // Explicit color background — `.background(.bar)` or any material
-        // gets the iOS 26 Liquid Glass treatment (rounded capsule, glassy
-        // blur). Color(.systemBackground) stays flat and edge-to-edge.
-        .background(Color(.systemBackground))
-        // Fill the screen edge-to-edge. Without this the WindowGroup may
-        // inset our content for "tab carousel" presentation on iOS 26.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(.keyboard)
-    }
-
-    @ViewBuilder
-    private var currentTabContent: some View {
-        switch sidebarTab {
-        case .library:
+        TabView(selection: $sidebarTab) {
             LibraryTab(
                 store: store,
                 recordStore: recordStore,
@@ -166,63 +149,42 @@ struct RootView: View {
                 makeReviewConfig: makeReviewConfig,
                 makeGeneratorConfig: makeGeneratorConfig
             )
-        case .create:
+            .tabItem { Label("题库", systemImage: "books.vertical.fill") }
+            .tag(SidebarTab.library)
+
             CreateTab(
                 store: store,
                 authService: authService,
                 publicStore: publicStore,
                 makeGeneratorConfig: makeGeneratorConfig
             )
-        case .square:
+            .tabItem { Label("出题", systemImage: "square.and.pencil") }
+            .tag(SidebarTab.create)
+
             SquareTab(
                 publicStore: publicStore,
                 recordStore: recordStore,
                 makeClaudeConfig: makeClaudeConfig,
                 makeReviewConfig: makeReviewConfig
             )
-        case .history:
+            .tabItem { Label("广场", systemImage: "globe") }
+            .tag(SidebarTab.square)
+
             HistoryTab(
                 recordStore: recordStore,
                 store: store,
                 makeReviewConfig: makeReviewConfig
             )
-        case .room:
+            .tabItem { Label("历史", systemImage: "clock.arrow.circlepath") }
+            .tag(SidebarTab.history)
+
             RoomTab(
                 publicStore: publicStore,
                 puzzleStore: store
             )
+            .tabItem { Label("联机", systemImage: "person.3.fill") }
+            .tag(SidebarTab.room)
         }
-    }
-
-    private var customTabBar: some View {
-        HStack(spacing: 0) {
-            tabButton(.library, label: "题库",  icon: "books.vertical.fill")
-            tabButton(.create,  label: "出题",  icon: "square.and.pencil")
-            tabButton(.square,  label: "广场",  icon: "globe")
-            tabButton(.history, label: "历史",  icon: "clock.arrow.circlepath")
-            tabButton(.room,    label: "联机",  icon: "person.3.fill")
-        }
-        .padding(.top, 6)
-        .padding(.bottom, 4)
-        // Solid color — avoid `.background(.bar)` because iOS 26 renders
-        // material backgrounds as floating Liquid Glass capsules.
-        .background(Color(.secondarySystemBackground))
-    }
-
-    private func tabButton(_ tab: SidebarTab, label: String, icon: String) -> some View {
-        Button {
-            sidebarTab = tab
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                Text(label)
-                    .font(.system(size: 10))
-            }
-            .frame(maxWidth: .infinity)
-            .foregroundStyle(sidebarTab == tab ? Color.accentColor : Color.secondary)
-        }
-        .buttonStyle(.plain)
     }
     #endif
 
