@@ -56,6 +56,11 @@ struct PuzzleEditorView: View {
                 fieldSection(label: "题目标题", required: true) {
                     TextField("请输入标题（最多 40 字）", text: $title)
                         .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                        .autocorrectionDisabled(false)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.default)
+#endif
                         .overlay(fieldBorder(hasError: titleError != nil))
                         .onChange(of: title) { validateTitle() }
                     if let err = titleError {
@@ -120,6 +125,11 @@ struct PuzzleEditorView: View {
                 fieldSection(label: "提示", required: false) {
                     TextField("选填，最多 100 字", text: $hint)
                         .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                        .autocorrectionDisabled(false)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.default)
+#endif
                         .overlay(fieldBorder(hasError: hintError != nil))
                         .onChange(of: hint) { validateHint() }
                     if let err = hintError {
@@ -131,6 +141,11 @@ struct PuzzleEditorView: View {
                 fieldSection(label: "作者署名", required: false) {
                     TextField("选填，最多 20 字", text: $author)
                         .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                        .autocorrectionDisabled(false)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.default)
+#endif
                         .overlay(fieldBorder(hasError: authorError != nil))
                         .onChange(of: author) { validateAuthor() }
                     if let err = authorError {

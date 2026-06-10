@@ -77,7 +77,8 @@ struct RootView: View {
                     claudeConfig: makeClaudeConfig(),
                     recordStore: recordStore,
                     reviewConfig: makeReviewConfig(),
-                    isPublicPuzzle: sidebarTab == .square
+                    isPublicPuzzle: sidebarTab == .square,
+                    onPlayNext: { advanceToNextPuzzle(after: puzzle) }
                 )
                 .id(puzzle.id)
             } else {
@@ -110,6 +111,19 @@ struct RootView: View {
                 puzzleStore: store
             )
         }
+    }
+
+    /// 下一题 (macOS): random unplayed puzzle from the active tab's pool,
+    /// falling back to any other one. Swapping selectedPuzzle rebuilds
+    /// GameView via .id(puzzle.id).
+    private func advanceToNextPuzzle(after current: Puzzle) {
+        let pool: [Puzzle] = sidebarTab == .square
+            ? publicStore.puzzles
+            : Puzzle.builtIn + store.puzzles
+        let others = pool.filter { $0.id != current.id }
+        guard !others.isEmpty else { return }
+        let unplayed = others.filter { recordStore.playCount(for: $0.id) == 0 }
+        selectedPuzzle = (unplayed.randomElement() ?? others.randomElement())
     }
     #endif
 

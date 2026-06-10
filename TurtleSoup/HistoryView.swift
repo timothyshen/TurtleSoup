@@ -23,21 +23,28 @@ struct HistorySidebarList: View {
             if records.isEmpty {
                 emptyState
             } else {
+                #if os(macOS)
                 List(filtered, selection: $selectedRecord) { record in
                     HistoryRow(record: record).tag(record)
                 }
-                #if os(macOS)
                 .listStyle(.sidebar)
                 .searchable(text: $searchText, placement: .sidebar, prompt: "搜索标题")
                 #else
-                // .sidebar style + placement are macOS-only. On iPhone
-                // .plain packs rows tighter and .automatic puts the
-                // searchable bar under the inline title where users
-                // expect. Hard edge mask crisps the boundary against
-                // the TabHeader above and Liquid Glass tab bar below.
-                .listStyle(.plain)
-                .searchable(text: $searchText, placement: .automatic, prompt: "搜索标题")
-                .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
+                // iOS: inline search field (shared with 题库) instead of
+                // .searchable — the tab roots hide their nav bars, so the
+                // system search bar has nowhere to render and silently
+                // disappears. Hard edge mask crisps the list boundary
+                // against the fixed chrome above/below.
+                VStack(spacing: 0) {
+                    InlineSearchField(prompt: "搜索标题", text: $searchText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                    List(filtered, selection: $selectedRecord) { record in
+                        HistoryRow(record: record).tag(record)
+                    }
+                    .listStyle(.plain)
+                    .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
+                }
                 #endif
             }
         }
@@ -194,7 +201,7 @@ struct HistoryOverviewView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color.secondary.opacity(0.06))
+        .background(Color.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -454,7 +461,7 @@ struct HistoryDetailView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
+        .background(Color.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -508,7 +515,7 @@ struct HistoryDetailView: View {
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.secondary.opacity(0.05))
+                .background(Color.cardBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }

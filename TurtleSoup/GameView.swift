@@ -8,26 +8,35 @@ struct GameView: View {
     /// Optional; if nil the "生成 AI 复盘" button is hidden (proxy not configured
     /// or user not signed in).
     let reviewConfig: ReviewService.Config?
+    /// Optional "play another puzzle" hook. When non-nil the answer sheet
+    /// shows a 下一题 button; the parent decides what "next" means (random
+    /// unplayed from the same list) and swaps its selection binding, which
+    /// rebuilds this view via .id(puzzle.id). nil = no button (e.g. the
+    /// multiplayer puzzle picker context).
+    let onPlayNext: (() -> Void)?
 
     @FocusState private var inputFocused: Bool
 
     // iOS-only size-class adapter. macOS doesn't expose horizontalSizeClass
     // (it doesn't have the concept — windows can be any width but there's
     // no "compact" classification). On iPad we're always .regular and use
-    // the two-column layout same as macOS. On iPhone (.compact) we fold
-    // the info pane behind a toolbar button → sheet.
+    // the two-column layout same as macOS. On iPhone (.compact) we pin a
+    // collapsible scenario card above the chat and fold stats/actions
+    // behind a toolbar button → sheet.
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var showInfoSheet = false
+    @State private var scenarioExpanded = true
     private var isCompact: Bool { hSize == .compact }
     #else
     private var isCompact: Bool { false }
     #endif
 
-    init(puzzle: Puzzle, claudeConfig: ClaudeService.Config, recordStore: GameRecordStore, reviewConfig: ReviewService.Config? = nil, isPublicPuzzle: Bool = false) {
+    init(puzzle: Puzzle, claudeConfig: ClaudeService.Config, recordStore: GameRecordStore, reviewConfig: ReviewService.Config? = nil, isPublicPuzzle: Bool = false, onPlayNext: (() -> Void)? = nil) {
         _vm = State(wrappedValue: GameViewModel(puzzle: puzzle, claudeConfig: claudeConfig, recordStore: recordStore, isPublicPuzzle: isPublicPuzzle))
         _recordStore = State(wrappedValue: recordStore)
         self.reviewConfig = reviewConfig
+        self.onPlayNext = onPlayNext
     }
 
     var body: some View {
@@ -78,17 +87,26 @@ struct GameView: View {
             }
             .onAppear {
                 inputFocused = true
-                vm.loadPastReview()   // deferred CoreData fetch — see GameViewModel
+                vm.loadPastReview()          // deferred CoreData fetch — see GameViewModel
+                vm.restoreSessionIfNeeded()  // resume an interrupted game, if any
             }
     }
 
     /// Switches between the macOS / iPad two-column layout and the iPhone
-    /// single-column layout. iPhone hides the info pane behind a toolbar
-    /// button (see `.toolbar` above) and renders just the chat full-width.
+    /// single-column layout. iPhone pins the scenario above the chat
+    /// (lateral-thinking players re-read it constantly — burying it in the
+    /// info sheet forced a modal round-trip per glance) and keeps
+    /// stats/actions behind the toolbar ℹ️ button.
     @ViewBuilder
     private var layoutForSizeClass: some View {
         if isCompact {
-            chatPane
+            VStack(spacing: 0) {
+                #if os(iOS)
+                scenarioPin
+                Divider()
+                #endif
+                chatPane
+            }
         } else {
             // HStack (not HSplitView): HSplitView is an interactive
             // resizable splitter that fights NavigationSplitView's sidebar-
@@ -105,6 +123,45 @@ struct GameView: View {
             }
         }
     }
+
+    // MARK: - Scenario pin (iPhone)
+
+    #if os(iOS)
+    /// Collapsible scenario card pinned above the chat on compact width.
+    /// Defaults to expanded; tapping the header collapses it to one line
+    /// to reclaim space once the player has internalized the setup.
+    private var scenarioPin: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    scenarioExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Label("汤面", systemImage: "doc.text.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(scenarioExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Text(vm.puzzle.scenario)
+                .font(.callout)
+                .lineSpacing(4)
+                .lineLimit(scenarioExpanded ? nil : 1)
+                .textSelection(.enabled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.cardBackground)
+    }
+    #endif
 
     // MARK: - Chat pane
 
@@ -145,29 +202,55 @@ struct GameView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            // macOS：用 TextEditor 支持多行
-            ZStack(alignment: .topLeading) {
-                if vm.inputText.isEmpty {
-                    Text(vm.isGameWon ? "谜题已解开" : "提问或陈述… (⌘↩ 发送)")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.top, 8)
-                        .allowsHitTesting(false)
-                }
-                TextEditor(text: $vm.inputText)
-                    .font(.body)
-                    .frame(minHeight: 38, maxHeight: 100)
-                    .scrollContentBackground(.hidden)
-                    .focused($inputFocused)
-                    .disabled(vm.isGameWon)
-                    .onKeyPress(.return, phases: .down) { press in
-                        // ⌘↩ 发送，普通 ↩ 换行
-                        if press.modifiers.contains(.command) {
-                            vm.send()
-                            return .handled
-                        }
-                        return .ignored
+            // Two input strategies:
+            //
+            // macOS — TextEditor: multi-line editing with ↩ = newline and
+            //   ⌘↩ = send (desktop chat convention; the placeholder
+            //   advertises the shortcut).
+            //
+            // iOS — TextField(axis: .vertical): grows up to 4 lines, and
+            //   the software keyboard's return key becomes a Send action
+            //   (submitLabel). TextEditor can't do this — onKeyPress only
+            //   fires for hardware keyboards, which left soft-keyboard
+            //   users with no way to send except the paperplane.
+            Group {
+                #if os(iOS)
+                TextField(
+                    vm.isGameWon ? "谜题已解开" : "提问或陈述…",
+                    text: $vm.inputText,
+                    axis: .vertical
+                )
+                .lineLimit(1...4)
+                .font(.body)
+                .focused($inputFocused)
+                .disabled(vm.isGameWon)
+                .submitLabel(.send)
+                .onSubmit { vm.send() }
+                #else
+                ZStack(alignment: .topLeading) {
+                    if vm.inputText.isEmpty {
+                        Text(vm.isGameWon ? "谜题已解开" : "提问或陈述… (⌘↩ 发送)")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.top, 8)
+                            .allowsHitTesting(false)
                     }
+                    TextEditor(text: $vm.inputText)
+                        .font(.body)
+                        .frame(minHeight: 38, maxHeight: 100)
+                        .scrollContentBackground(.hidden)
+                        .focused($inputFocused)
+                        .disabled(vm.isGameWon)
+                        .onKeyPress(.return, phases: .down) { press in
+                            // ⌘↩ 发送，普通 ↩ 换行
+                            if press.modifiers.contains(.command) {
+                                vm.send()
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                }
+                #endif
             }
             .padding(8)
             // Cross-platform "text editor background" color. NSColor.textBackgroundColor
@@ -263,7 +346,9 @@ struct GameView: View {
                     Button(role: .destructive) {
                         vm.showGiveUpConfirm = true
                     } label: {
-                        Label("放弃查看答案", systemImage: "flag.fill")
+                        // "放弃并看汤底" — the old "放弃查看答案" parsed
+                        // ambiguously as "放弃【查看答案】" (decline to view).
+                        Label("放弃并看汤底", systemImage: "flag.fill")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.bordered)
@@ -276,15 +361,15 @@ struct GameView: View {
                     }
                 }
 
-                Button {
-                    // TODO: 分享功能
-                } label: {
+                // Share is always available — a stumped player bragging
+                // "this one beat me, can you solve it?" is just as viral
+                // as a win. The share text never includes the answer.
+                ShareLink(item: shareText) {
                     Label("分享题目", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(!vm.isGameWon)
             }
             .padding(16)
 
@@ -337,19 +422,33 @@ struct GameView: View {
 
     // MARK: - Answer sheet
 
+    /// Share copy for the current game. Win → brag with the question
+    /// count; loss → "this one beat me" challenge. Neither leaks the
+    /// answer — just the title and scenario hook.
+    private var shareText: String {
+        let header = vm.isGameWon
+            ? "我在《海龟汤》用 \(vm.questionCount) 个问题解开了「\(vm.puzzle.title)」！你能用更少的问题吗？"
+            : "这道海龟汤把我难住了：「\(vm.puzzle.title)」，你能解开吗？"
+        return "\(header)\n\n汤面：\(vm.puzzle.scenario)"
+    }
+
     private var answerSheet: some View {
         // Outer ScrollView so the sheet contents — which can grow tall
         // once an AI review with 3-5 moments + summary + tip + the
         // existing fixed-height answer block lands — stay reachable on
-        // narrow iPhone screens. The inner answer-text ScrollView is now
-        // redundant (nested scrollers fight each other), so it's been
-        // unwrapped into a plain Text block.
-        ScrollView {
+        // narrow iPhone screens.
+        //
+        // iOS wraps in NavigationStack so 完成 lives in the toolbar — at
+        // the end of a long review the close affordance shouldn't require
+        // scrolling to the bottom. macOS keeps the inline footer button
+        // (sheet toolbars are unusual there).
+        let core = ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                #if os(macOS)
                 Text("真相大白")
                     .font(.title2.weight(.semibold))
-
                 Divider()
+                #endif
 
                 // 统计
                 HStack(spacing: 32) {
@@ -377,22 +476,66 @@ struct GameView: View {
                     reviewSection
                 }
 
-                HStack {
-                    Spacer()
-                    Button("完成") { vm.showAnswer = false }
-                        .keyboardShortcut(.defaultAction)
+                Divider()
+
+                // Game-loop CTAs. 下一题 keeps the session going (the #1
+                // retention lever — without it every finished game dead-ends
+                // back at the list); ShareLink turns wins into invitations.
+                VStack(spacing: 10) {
+                    if let onPlayNext {
+                        Button {
+                            vm.showAnswer = false
+                            onPlayNext()
+                        } label: {
+                            Label("下一题", systemImage: "arrow.right.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                    HStack {
+                        ShareLink(item: shareText) {
+                            Label(vm.isGameWon ? "分享战绩" : "分享这道题", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                        #if os(macOS)
+                        // Prominent only when it's the sole CTA — with a
+                        // 下一题 button above, 完成 takes the back seat.
+                        // (if/else, not a ternary: .borderedProminent and
+                        // .bordered are distinct ButtonStyle types.)
+                        if onPlayNext == nil {
+                            Button("完成") { vm.showAnswer = false }
+                                .keyboardShortcut(.defaultAction)
+                                .buttonStyle(.borderedProminent)
+                        } else {
+                            Button("完成") { vm.showAnswer = false }
+                                .keyboardShortcut(.defaultAction)
+                                .buttonStyle(.bordered)
+                        }
+                        #endif
+                    }
                 }
             }
             .padding(24)
         }
+
         #if os(macOS)
         // macOS sheets don't size to fit content — give it an explicit
         // width. iOS gets the system sheet width, with the content
         // free-flowing inside scrollable bounds.
-        .frame(width: 480)
+        return core.frame(width: 480)
         #else
-        .frame(maxWidth: .infinity)
+        return NavigationStack {
+            core
+                .navigationTitle("真相大白")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { vm.showAnswer = false }
+                    }
+                }
+        }
         #endif
     }
 

@@ -1,6 +1,43 @@
 import Foundation
 import Observation
 
+// MARK: - In-progress session persistence
+//
+// iPhones kill backgrounded apps routinely; losing a half-played game to
+// that is the single most frustrating failure mode a player can hit. We
+// snapshot the live session to UserDefaults after every turn and restore
+// it when the same puzzle is reopened.
+//
+// UserDefaults (not CoreData) on purpose: the payload is one small JSON
+// blob (a 50-turn game ≈ 5 KB), there's at most one in-progress session
+// per puzzle, and adding a CoreData entity would force a schema
+// migration for what is essentially a scratch file. Finished games still
+// go through GameRecordStore/CoreData as before.
+nonisolated struct InProgressSession: Codable {
+    let puzzleID: UUID
+    let startedAt: Date
+    let questionCount: Int
+    let messages: [Message]
+
+    private static func key(_ puzzleID: UUID) -> String {
+        "inProgressSession_\(puzzleID.uuidString)"
+    }
+
+    static func load(puzzleID: UUID) -> InProgressSession? {
+        guard let data = UserDefaults.standard.data(forKey: key(puzzleID)) else { return nil }
+        return try? JSONDecoder().decode(InProgressSession.self, from: data)
+    }
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: Self.key(puzzleID))
+    }
+
+    static func clear(puzzleID: UUID) {
+        UserDefaults.standard.removeObject(forKey: key(puzzleID))
+    }
+}
+
 @Observable
 @MainActor
 final class GameViewModel {
@@ -34,7 +71,12 @@ final class GameViewModel {
 
     let puzzle: Puzzle
     private let recordStore: GameRecordStore
-    private let startedAt: Date = Date()
+    /// var (not let): restoreSessionIfNeeded rewinds this to the original
+    /// session start so a restored game's duration stays honest.
+    private var startedAt: Date = Date()
+    /// Guard so the restore only runs once per VM lifetime (onAppear can
+    /// fire multiple times on iOS when sheets come and go).
+    private var didAttemptRestore = false
     private let claude: ClaudeService
     /// True when this puzzle was selected from the public square. Drives the
     /// publicPuzzles/{id}.playCount writeback on game end.
@@ -71,6 +113,33 @@ final class GameViewModel {
     func loadPastReview() {
         guard pastReview == nil else { return }
         pastReview = recordStore.latestReview(for: puzzle.id)
+    }
+
+    /// Restore a previously-interrupted session for this puzzle, if any.
+    /// Called from .onAppear (same deferred pattern as loadPastReview —
+    /// init runs per body eval, so no UserDefaults reads there). Only
+    /// restores when the current VM is still pristine (no questions asked)
+    /// so an active in-memory game is never clobbered.
+    func restoreSessionIfNeeded() {
+        guard !didAttemptRestore else { return }
+        didAttemptRestore = true
+        guard questionCount == 0, !isGameWon,
+              let saved = InProgressSession.load(puzzleID: puzzle.id),
+              !saved.messages.isEmpty else { return }
+        messages = saved.messages
+        questionCount = saved.questionCount
+        startedAt = saved.startedAt
+    }
+
+    /// Snapshot the live session after each turn. Cheap (one small JSON
+    /// encode) and called at most once per question round-trip.
+    private func saveSession() {
+        InProgressSession(
+            puzzleID: puzzle.id,
+            startedAt: startedAt,
+            questionCount: questionCount,
+            messages: messages
+        ).save()
     }
 
     convenience init(puzzle: Puzzle, claudeConfig: ClaudeService.Config, recordStore: GameRecordStore, isPublicPuzzle: Bool = false) {
@@ -134,12 +203,18 @@ final class GameViewModel {
                     persistRecord(isWon: true)
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     showAnswer = true
+                } else {
+                    // Mid-game checkpoint — survives the app being killed.
+                    saveSession()
                 }
             } catch {
                 errorMessage = error.localizedDescription
                 // Drop the placeholder so the chat history doesn't show a
                 // half-filled bubble after a failure.
                 messages.removeAll { $0.id == placeholderID }
+                // The user's question is still in the transcript; keep the
+                // checkpoint current so a relaunch doesn't lose it.
+                saveSession()
             }
             isLoading = false
         }
@@ -172,6 +247,10 @@ final class GameViewModel {
     }
 
     private func persistRecord(isWon: Bool) {
+        // Game over — the scratch checkpoint is superseded by the real
+        // CoreData record below.
+        InProgressSession.clear(puzzleID: puzzle.id)
+
         let record = GameRecord(
             puzzleID:      puzzle.id,
             puzzleTitle:   puzzle.title,
@@ -200,10 +279,8 @@ final class GameViewModel {
     func startReviewGeneration(config: ReviewService.Config) {
         // Don't double-start; the in-flight task will populate everything.
         guard aiReview == nil, !isGeneratingReview else {
-            print("⚠️ [Review] startReviewGeneration bailed: aiReview=\(aiReview != nil ? "set" : "nil") isGenerating=\(isGeneratingReview)")
             return
         }
-        print("▶️ [Review] startReviewGeneration kicking off task")
         reviewTask = Task { [weak self] in
             await self?.generateReview(config: config)
         }
@@ -231,16 +308,13 @@ final class GameViewModel {
     /// cancel-able Task handle and shields callers from threading details.
     func generateReview(config: ReviewService.Config) async {
         guard aiReview == nil, !isGeneratingReview else {
-            print("⚠️ [Review] generateReview bailed: aiReview=\(aiReview != nil ? "set" : "nil") isGenerating=\(isGeneratingReview)")
             return
         }
         guard let recordID = lastSavedRecordID else {
             // Should only happen if called before persistRecord — bail quietly.
-            print("⚠️ [Review] generateReview bailed: lastSavedRecordID is nil (game not persisted yet)")
             return
         }
 
-        print("▶️ [Review] starting stream for puzzle=\(puzzle.title) won=\(isGameWon) questions=\(questionCount)")
         isGeneratingReview = true
         reviewError = nil
         reviewProgress = []
@@ -257,28 +331,22 @@ final class GameViewModel {
                 isWon: isGameWon,
                 questionCount: questionCount
             )
-            print("📡 [Review] stream opened, waiting for events…")
             for try await event in stream {
                 try Task.checkCancellation()
                 switch event {
                 case .progress(let field, let value):
-                    print("📨 [Review] progress field=\(field) value.len=\(value.count)")
                     if !reviewProgress.contains(where: { $0.field == field }) {
                         reviewProgress.append((field: field, value: value))
                     }
                 case .complete(let review):
-                    print("✅ [Review] complete: summary=\(review.summary.prefix(40))… moments=\(review.keyMoments.count)")
                     recordStore.updateAIReview(recordID: recordID, review: review)
                     aiReview = review
                 }
             }
-            print("🏁 [Review] stream finished")
         } catch is CancellationError {
             // Expected on user-initiated cancel; cancelReviewGeneration
             // already reset the UI state. Don't surface as an error.
-            print("🚫 [Review] cancelled")
         } catch {
-            print("❌ [Review] error: \(error.localizedDescription)")
             reviewError = error.localizedDescription
         }
     }

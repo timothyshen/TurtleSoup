@@ -27,7 +27,7 @@ struct PublicSquareView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(publicStore.puzzles, selection: $selectedPuzzle) { puzzle in
-                    PuzzleRow(puzzle: puzzle)
+                    PuzzleRow(puzzle: puzzle, publicPlayCount: puzzle.playCount)
                         .tag(puzzle)
                 }
                 #if os(macOS)

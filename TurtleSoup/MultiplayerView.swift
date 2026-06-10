@@ -125,7 +125,7 @@ struct RoomSidebarView: View {
             .padding(.top, 4)
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var notSignedInPrompt: some View {
@@ -264,6 +264,11 @@ struct CreateRoomSheet: View {
             Section("玩家名称") {
                 TextField("显示名", text: $displayName)
                     .textContentType(.nickname)
+                    #if os(iOS)
+                    .autocorrectionDisabled(false)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.default)
+                    #endif
                     .onAppear {
                         if displayName.isEmpty {
                             displayName = authService.displayName
@@ -384,6 +389,11 @@ struct JoinRoomSheet: View {
             Section("玩家名称") {
                 TextField("显示名", text: $displayName)
                     .textContentType(.nickname)
+                    #if os(iOS)
+                    .autocorrectionDisabled(false)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.default)
+                    #endif
                     .onAppear {
                         if displayName.isEmpty {
                             displayName = authService.displayName
@@ -507,7 +517,7 @@ struct LobbyView: View {
                 .tracking(8)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 12))
 
             HStack(spacing: 8) {
                 Label(roomService.room?.mode.label ?? "", systemImage: "gamecontroller")
@@ -557,7 +567,7 @@ struct LobbyView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
                         .padding(.horizontal, 16)
                     }
                 }
@@ -808,7 +818,7 @@ struct RoomActiveView: View {
             }
         }
         .padding(10)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func verdictColor(_ v: Message.Verdict) -> Color {
@@ -838,8 +848,16 @@ struct RoomActiveView: View {
 
     private var questionerInput: some View {
         HStack(spacing: 8) {
-            TextField("提问（答案只能是是/否/无关/部分/解谜）", text: $inputText, axis: .vertical)
+            // Short placeholder — the long rules reminder ("答案只能是…")
+            // truncated badly on narrow screens, and the round header
+            // already explains who's asking. Keep the input clean.
+            TextField("提问…", text: $inputText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
+                #if os(iOS)
+                .autocorrectionDisabled(false)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.default)
+                #endif
                 .lineLimit(1...3)
                 .disabled(isSubmitting)
                 .onSubmit { Task { await submitTapped() } }
@@ -868,7 +886,7 @@ struct RoomActiveView: View {
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity)
         .padding(12)
-        .background(Color.secondary.opacity(0.05))
+        .background(Color.cardBackground)
     }
 
     @ViewBuilder
@@ -893,7 +911,7 @@ struct RoomActiveView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
-        .background(Color.secondary.opacity(0.05))
+        .background(Color.cardBackground)
     }
 
     @ViewBuilder
@@ -1208,7 +1226,7 @@ struct RoomFinishedView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: leaderboard (party mode)
@@ -1310,7 +1328,7 @@ struct RoomFinishedView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
                 }
             }
         }

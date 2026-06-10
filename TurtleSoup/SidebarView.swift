@@ -30,6 +30,14 @@ struct SidebarView: View {
         }
     }
 
+    /// "Have I played this?" marker for the library list, derived from
+    /// the local game records. won beats played; nil = untouched.
+    private func playedStatus(for puzzle: Puzzle) -> PuzzlePlayedStatus? {
+        let _ = recordStore.savedRecordCount  // @Observable dependency: refresh on new records
+        guard recordStore.playCount(for: puzzle.id) > 0 else { return nil }
+        return recordStore.winRate(for: puzzle.id) > 0 ? .won : .played
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // iOS: render the app title inline at the top of the sidebar.
@@ -69,8 +77,8 @@ struct SidebarView: View {
             if sidebarTab == .library {
                 // 搜索框 — 自建而非 .searchable(placement:.sidebar)。后者在我们
                 // 这个自定义 VStack 头部里光标和 placeholder 会差几个像素，看着
-                // 别扭。TextField + 放大镜图标手动拼，对齐就在自己手里。
-                searchField
+                // 别扭。共享的 InlineSearchField（iOS tab 们也用它）。
+                InlineSearchField(prompt: "搜索谜题", text: $searchText)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 6)
 
@@ -83,7 +91,7 @@ struct SidebarView: View {
 
                 // 题目列表
                 List(filtered, selection: $selectedPuzzle) { puzzle in
-                    PuzzleRow(puzzle: puzzle)
+                    PuzzleRow(puzzle: puzzle, playedStatus: playedStatus(for: puzzle))
                         .tag(puzzle)
                 }
                 // .sidebar style on iPhone wraps rows in chunky inset
@@ -199,32 +207,6 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-
-    // MARK: - Search field
-
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            TextField("搜索谜题", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Filter bar
@@ -351,12 +333,25 @@ struct FilterChip: View {
     let isOn: Bool
     let action: () -> Void
 
+    // iOS gets taller chips: the 24pt-tall macOS sizing is far below the
+    // HIG's 44pt touch-target floor and easy to fat-finger. 8pt vertical
+    // padding + minHeight 36 lands close enough given the chips sit in
+    // their own row with vertical breathing room around them.
+    #if os(iOS)
+    private let vPad: CGFloat = 8
+    private let minHeight: CGFloat = 36
+    #else
+    private let vPad: CGFloat = 4
+    private let minHeight: CGFloat = 0
+    #endif
+
     var body: some View {
         Button(action: action) {
             Text(label)
                 .font(.caption.weight(isOn ? .semibold : .regular))
                 .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.vertical, vPad)
+                .frame(minHeight: minHeight)
                 .background(isOn ? Color.accentColor.opacity(0.15) : Color.clear)
                 .foregroundStyle(isOn ? Color.accentColor : .secondary)
                 .overlay(
@@ -366,6 +361,7 @@ struct FilterChip: View {
                     )
                 )
                 .clipShape(Capsule())
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -373,12 +369,30 @@ struct FilterChip: View {
 
 // MARK: - Puzzle row
 
+/// Played-state marker for list rows. Computed by the caller from
+/// GameRecordStore (won = at least one win on record; played = attempted
+/// but never solved). nil = never played / caller doesn't track it.
+enum PuzzlePlayedStatus {
+    case won, played
+}
+
 struct PuzzleRow: View {
     let puzzle: Puzzle
+    /// "Have I done this one?" at a glance — the main question when
+    /// scanning the library for what to play next.
+    var playedStatus: PuzzlePlayedStatus? = nil
+    /// Community play count (public square). nil hides the counter.
+    var publicPlayCount: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack {
+            HStack(spacing: 5) {
+                if let status = playedStatus {
+                    Image(systemName: status == .won ? "checkmark.seal.fill" : "circle.bottomhalf.filled")
+                        .font(.system(size: 11))
+                        .foregroundStyle(status == .won ? Color.teal : Color.secondary)
+                        .accessibilityLabel(status == .won ? "已通关" : "玩过未通关")
+                }
                 Text(puzzle.title)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
@@ -390,11 +404,22 @@ struct PuzzleRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .lineSpacing(2)
-            Text("by \(puzzle.author)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                Text("by \(puzzle.author)")
+                if let count = publicPlayCount, count > 0 {
+                    Text("·")
+                    Label(formattedPlayCount(count), systemImage: "person.2.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+    }
+
+    private func formattedPlayCount(_ n: Int) -> String {
+        n >= 1000 ? String(format: "%.1fk 玩过", Double(n) / 1000) : "\(n) 玩过"
     }
 }
 
@@ -415,7 +440,10 @@ struct DifficultyBadge: View {
 
     private var color: Color {
         switch difficulty {
-        case .easy:   return .teal
+        // green (not teal): teal is the app-wide "win/victory" color —
+        // win verdicts, the win banner, 通关 seals. Difficulty "easy"
+        // sharing it muddied both meanings.
+        case .easy:   return .green
         case .medium: return .orange
         case .hard:   return .red
         }

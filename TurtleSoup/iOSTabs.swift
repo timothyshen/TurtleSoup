@@ -39,7 +39,9 @@ private struct TabHeader: View {
                 }
             }
             Text(title)
-                .font(.title3.weight(.semibold))
+                // .title2.bold — closer to iOS native large-title weight so
+                // the header reads as page identity, not just another label.
+                .font(.title2.bold())
             Spacer()
             Button {
                 showSettingsSheet = true
@@ -114,14 +116,15 @@ struct LibraryTab: View {
             Divider()
             NavigationStack {
                 VStack(spacing: 0) {
-                    inlineSearchField
+                    InlineSearchField(prompt: "搜索谜题", text: $searchText)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                     filterChips
                         .padding(.horizontal, 12)
                         .padding(.bottom, 6)
                     List(filtered, selection: $selectedPuzzle) { puzzle in
-                        PuzzleRow(puzzle: puzzle).tag(puzzle)
+                        PuzzleRow(puzzle: puzzle, playedStatus: playedStatus(for: puzzle))
+                            .tag(puzzle)
                     }
                     .listStyle(.plain)
                     // Hard scroll edge mask: crisp cutoff between TabHeader/
@@ -138,7 +141,8 @@ struct LibraryTab: View {
                         claudeConfig: makeClaudeConfig(),
                         recordStore: recordStore,
                         reviewConfig: makeReviewConfig(),
-                        isPublicPuzzle: false
+                        isPublicPuzzle: false,
+                        onPlayNext: { advanceToNextPuzzle(after: puzzle) }
                     )
                     .id(puzzle.id)
                 }
@@ -147,30 +151,21 @@ struct LibraryTab: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// Inline search field — replaces `.searchable` since we don't have a
-    /// nav bar to host it. Same shape as the macOS sidebar version.
-    private var inlineSearchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            TextField("搜索谜题", text: $searchText)
-                .textFieldStyle(.plain)
-                .autocorrectionDisabled()
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    /// "Have I played this?" marker — derived from local records.
+    private func playedStatus(for puzzle: Puzzle) -> PuzzlePlayedStatus? {
+        let _ = recordStore.savedRecordCount  // @Observable refresh hook
+        guard recordStore.playCount(for: puzzle.id) > 0 else { return nil }
+        return recordStore.winRate(for: puzzle.id) > 0 ? .won : .played
+    }
+
+    /// 下一题: prefer a random puzzle the player hasn't tried, fall back
+    /// to any other puzzle. Swapping `selectedPuzzle` replaces the pushed
+    /// GameView in place (navigationDestination(item:)).
+    private func advanceToNextPuzzle(after current: Puzzle) {
+        let others = puzzles.filter { $0.id != current.id }
+        guard !others.isEmpty else { return }
+        let unplayed = others.filter { recordStore.playCount(for: $0.id) == 0 }
+        selectedPuzzle = (unplayed.randomElement() ?? others.randomElement())
     }
 
     private var filterChips: some View {
@@ -298,7 +293,12 @@ struct SquareTab: View {
                         emptyState
                     } else {
                         List(publicStore.puzzles, selection: $selectedPuzzle) { puzzle in
-                            PuzzleRow(puzzle: puzzle).tag(puzzle)
+                            // publicPlayCount: surface community traction —
+                            // the square felt like a dead list without any
+                            // social signal despite the data being right
+                            // there on the model.
+                            PuzzleRow(puzzle: puzzle, publicPlayCount: puzzle.playCount)
+                                .tag(puzzle)
                         }
                         .listStyle(.plain)
                         .refreshable { await publicStore.refresh() }
@@ -312,7 +312,8 @@ struct SquareTab: View {
                         claudeConfig: makeClaudeConfig(),
                         recordStore: recordStore,
                         reviewConfig: makeReviewConfig(),
-                        isPublicPuzzle: true
+                        isPublicPuzzle: true,
+                        onPlayNext: { advanceToNextPuzzle(after: puzzle) }
                     )
                     .id(puzzle.id)
                 }
@@ -332,6 +333,15 @@ struct SquareTab: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 下一题 within the square: random unplayed public puzzle, falling
+    /// back to any other one.
+    private func advanceToNextPuzzle(after current: Puzzle) {
+        let others = publicStore.puzzles.filter { $0.id != current.id }
+        guard !others.isEmpty else { return }
+        let unplayed = others.filter { recordStore.playCount(for: $0.id) == 0 }
+        selectedPuzzle = (unplayed.randomElement() ?? others.randomElement())
     }
 }
 
